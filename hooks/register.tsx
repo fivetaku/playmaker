@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 import type { Board, Milestone, Task, TaskState } from '../types'
-import { ACTIONS, actionMessage, counts, parseBoard, summaryLine, summaryText, taskId } from './parse'
+import { ACTIONS, about, actionMessage, counts, parseBoard, summaryLine, summaryText, taskId } from './parse'
 
 const PANE = 'playmaker'
 const TITLE = '골 진행'
@@ -419,6 +419,7 @@ export const register: Register = on => {
               <Text bold color={ms.status === 'current' ? 'yellow' : ms.status === 'done' ? 'green' : undefined}>
                 {head} M{ms.id} {ms.name} ({n}/{ms.tasks.length})
               </Text>
+              {about(ms) ? <Text dimColor wrap="truncate-end">{'  '}{about(ms)}</Text> : null}
               {fold ? null : ms.tasks.map((t, i) => (
                 <Box key={`mb-${ms.id}-${i}`} flexDirection="column">
                   <Button key={`t:${ms.id}:${i}`} plain onPress={noop}>

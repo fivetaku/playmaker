@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'claude-code/testing'
-import { parseBoard, summaryLine } from './hooks/parse'
+import { about, parseBoard, summaryLine, summaryText } from './hooks/parse'
 
 // ── fixtures ────────────────────────────────────────────────
 // goaljaby 0.7+ 체크리스트 형식
@@ -131,6 +131,18 @@ describe('parser', () => {
     const b = parseBoard('/g', PLAN_TABLE, '', 0)
     expect(b.milestones.map(m => m.id)).toEqual(['1a', '1b'])
     expect(b.milestones[0].tasks.map(t => t.text)).toEqual(['설정 후보', '진단 페이지·타이머'])
+  })
+
+  test('마일스톤 설명: 목적 줄 우선, 없으면 범위 / 골 문장은 PROGRESS 없으면 PLAN 목표', () => {
+    const plan = PLAN_NEW.replace('## 마일스톤 1: 스캐폴딩\n', '# 목표 자리\n## 목표\n\n로그인되는 MVP를 배포한다.\n\n## 마일스톤 1: 스캐폴딩\n- 목적: 나머지 작업이 올라갈 빈 프로젝트를 만든다\n')
+    const b = parseBoard('/g', plan, '', 0)
+    expect(b.goal).toBe('로그인되는 MVP를 배포한다.')
+    expect(b.milestones[0].purpose).toBe('나머지 작업이 올라갈 빈 프로젝트를 만든다')
+    expect(b.milestones[0].doneWhen).toBe('빌드 통과')
+    expect(about(b.milestones[0])).toBe('나머지 작업이 올라갈 빈 프로젝트를 만든다')
+    expect(about(b.milestones[1])).toBe('OAuth, 승인 게이트')
+    expect(about(b.milestones[2])).toBe('')
+    expect(summaryText(b)).toContain('> 나머지 작업이 올라갈 빈 프로젝트를 만든다')
   })
 
   test('canonical + ### 혼합: 둘 다 찾고 ### 아래 체크리스트도 읽음', () => {

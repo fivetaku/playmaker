@@ -16,6 +16,8 @@ const H = {
   validation: /^##\s*(?:마지막 검증 결과|Last Validation)\s*$/,
   scope: /^\s*[-*]\s*(?:범위(?:\s*\(Scope\))?|Scope)\s*[:：]\s*(.+)$/i,
   doneWhen: /^\s*[-*]\s*(?:완료 조건|Completion|Done when)\s*[:：]\s*(.+)$/i,
+  purpose: /^\s*[-*]\s*(?:목적|Purpose|Why)\s*[:：]\s*(.+)$/i,
+  planGoal: /^##\s*(?:목표|Goal)\s*$/,
   checkbox: /^\s*[-*]\s*\[([ xX✓>!])\]\s*(?:\**(M\d+[a-z]?-T\d+)\**\s*[:：]\s*)?(.+?)\s*$/,
   waitWords: /대기|동석|사람\s*(?:측정|확인|판단|증거)|blocked|waiting|on hold|needs? (?:human|user)/i,
 }
@@ -143,7 +145,9 @@ export function parseBoard(dir: string, plan: string, progress: string, now: num
 
   const milestones: Milestone[] = heads.map(h => {
     const body = bodyOf(lines, h, heads)
-    const doneWhen = body.map(l => l.match(H.doneWhen)).find(Boolean)?.[1].trim() ?? ''
+    const doneWhen = clean(body.map(l => l.match(H.doneWhen)).find(Boolean)?.[1] ?? '')
+    const purpose = clean(body.map(l => l.match(H.purpose)).find(Boolean)?.[1] ?? '')
+    const scope = clean(body.map(l => l.match(H.scope)).find(Boolean)?.[1] ?? h.tableScope ?? '')
     const boxes = body.map(l => l.match(H.checkbox)).filter(Boolean) as RegExpMatchArray[]
     const entry = doneEntry(doneText, h)
     const progressDone = saysAllDone || entry.hit
@@ -157,7 +161,7 @@ export function parseBoard(dir: string, plan: string, progress: string, now: num
       const status = all ? 'done' : started || progressCurrent ? 'current' : 'todo'
       if (progressDone && !all) mismatch.push(`M${h.id}: PROGRESS는 완료, PLAN 체크리스트에 남은 작업 ${tasks.filter(t => t.state !== 'done').length}건`)
       if (all && !progressDone && !saysAllDone && doneText) mismatch.push(`M${h.id}: 체크리스트는 모두 완료, PROGRESS 완료 기록 없음`)
-      return { id: h.id, name: h.name, status, waiting: tasks.some(t => t.state === 'waiting'), tasks, doneWhen, source: 'checklist' }
+      return { id: h.id, name: h.name, status, waiting: tasks.some(t => t.state === 'waiting'), tasks, purpose, scope, doneWhen, source: 'checklist' }
     }
 
     const status = progressDone ? 'done' : progressCurrent ? 'current' : 'todo'
@@ -166,14 +170,14 @@ export function parseBoard(dir: string, plan: string, progress: string, now: num
       ? entry.sub
       : splitTopLevel(body.map(l => l.match(H.scope)).find(Boolean)?.[1] ?? h.tableScope ?? '')
     const tasks: Task[] = texts.map(text => ({ text, state: legacyState, inferred: true }))
-    return { id: h.id, name: h.name, status, waiting: legacyState === 'waiting', tasks, doneWhen, source: 'legacy' }
+    return { id: h.id, name: h.name, status, waiting: legacyState === 'waiting', tasks, purpose, scope, doneWhen, source: 'legacy' }
   })
 
   const failedText = section(progress, H.failed)
   const failed = failedText.split('\n').filter(l => /^\s*([-*]|\d+\.)\s+\S/.test(l) && !/^\s*[-*]\s*\(?없음\)?\s*$/.test(l)).length
   return {
     dir,
-    goal: firstMeaningful(section(progress, H.goal)),
+    goal: firstMeaningful(section(progress, H.goal)) || firstMeaningful(section(plan, H.planGoal)),
     milestones,
     failed,
     lastValidation: firstMeaningful(section(progress, H.validation)),
@@ -204,6 +208,11 @@ export function summaryLine(b: Board): string {
   return parts.join(' · ')
 }
 
+// 마일스톤 한 줄 설명: goaljaby 0.7.2+의 목적 줄, 없으면 범위
+export function about(m: Milestone): string {
+  return m.purpose || m.scope
+}
+
 const MD_ICON: Record<TaskState, string> = { todo: '⬜', doing: '▶️', done: '✅', waiting: '⏸️' }
 
 // 텍스트 요약: 마크다운. Paseo·채팅 화면에서 표와 목록으로 그려진다
@@ -220,7 +229,7 @@ export function summaryText(b: Board): string {
     const n = m.tasks.filter(t => t.state === 'done').length
     const head = m.status === 'done' ? '✅' : m.status === 'current' ? (m.waiting ? '⏸️' : '▶️') : '⬜'
     const lines = m.status === 'done' ? [] : m.tasks.map(t => `- ${MD_ICON[t.state]} ${t.id ? `${t.id}: ` : ''}${t.text}`)
-    return [`**${head} M${m.id} ${m.name}** (${n}/${m.tasks.length})`, ...lines].join('\n')
+    return [`**${head} M${m.id} ${m.name}** (${n}/${m.tasks.length})`, ...(about(m) ? [`> ${about(m)}`] : []), ...lines].join('\n')
   })
   return [
     `**${summaryLine(b)}**`,

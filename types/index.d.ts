@@ -16,6 +16,10 @@ export type Milestone = {
   /** 진행 중이지만 사람 판단·외부 입력을 기다리는 중 */
   waiting: boolean
   tasks: Task[]
+  /** 이 마일스톤을 왜 하는지 (goaljaby 0.7.2+ `- 목적:` 줄) */
+  purpose: string
+  /** 이 마일스톤에서 하는 일 (`- 범위(Scope):` 줄) */
+  scope: string
   doneWhen: string
   /** checklist: PLAN 체크리스트 / legacy: PROGRESS·범위에서 추정 */
   source: 'checklist' | 'legacy'

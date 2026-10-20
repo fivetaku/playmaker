@@ -124,6 +124,13 @@ kbd{font:10.5px var(--font);color:var(--faint);border:1px solid var(--line2);bor
 .tab .p{color:var(--faint);font-variant-numeric:tabular-nums}.tab svg{flex:none}
 .prog{margin-left:auto;display:flex;align-items:center;gap:7px;color:var(--dim);white-space:nowrap;font-variant-numeric:tabular-nums;padding-left:12px}
 .warn{margin:8px 12px 0;padding:7px 10px;border-radius:6px;font-size:12px;color:var(--fg2);background:color-mix(in srgb,var(--wait) 10%,transparent);border:1px solid color-mix(in srgb,var(--wait) 28%,transparent)}
+/* 골·마일스톤 개요 */
+.about{margin:8px 12px 0;border:1px solid var(--line);border-radius:8px;background:var(--lane);font-size:12.5px}
+.about summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;padding:8px 11px;color:var(--dim)}.about summary::-webkit-details-marker{display:none}
+.about summary b{color:var(--fg);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.about[open] summary{border-bottom:1px solid var(--line)}
+.about .ab{padding:8px 11px 10px;display:grid;grid-template-columns:auto 1fr;gap:5px 12px;color:var(--fg2)}
+.about .ab>span:nth-child(odd){color:var(--faint);white-space:nowrap}.about .ab svg{vertical-align:-2px;margin-right:4px}
+.gh .ab{flex-basis:100%;color:var(--dim);font-weight:400;font-size:12px;margin-top:2px}
 main{flex:1;overflow:auto}
 /* 보드 */
 .board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:10px 12px 16px;align-items:start}
@@ -143,7 +150,7 @@ main{flex:1;overflow:auto}
 .fold{display:flex;align-items:center;gap:8px;height:32px;padding:0 6px;color:var(--fg2)}.fold .c{margin-left:auto;color:var(--faint)}
 /* 리스트 */
 .list{padding:6px 0 16px}
-.gh{display:flex;align-items:center;gap:8px;height:36px;padding:0 14px;font-weight:500;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.gh{display:flex;flex-wrap:wrap;align-items:center;gap:0 8px;min-height:36px;padding:8px 14px;font-weight:500;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 .gh .c{color:var(--faint);font-weight:400}.gh .pc{margin-left:auto;color:var(--dim);font-weight:400;font-variant-numeric:tabular-nums}
 .row{display:flex;align-items:center;gap:10px;height:38px;padding:0 14px;border-bottom:1px solid var(--line);color:var(--fg2)}
 .row:hover{background:var(--card-h)}.row .id{color:var(--faint);width:52px;flex:none;font-variant-numeric:tabular-nums}
@@ -194,6 +201,7 @@ main{flex:1;overflow:auto}
 </header>
 <nav class="tabs" id="tabs"></nav>
 <div id="warn"></div>
+<details class="about" id="about" open></details>
 <main><section class="board" id="board"></section><section class="list hidden" id="list"></section></main>
 <footer class="foot" id="foot"></footer>
 <aside class="peek" id="peek"><div class="ph"><span id="pid"></span><button class="x" id="px" title="닫기 (Esc)">✕</button></div><div class="pb" id="pb"></div></aside>
@@ -215,7 +223,7 @@ function diamond(m,size){const s=size||12,st=msState(m),n=m.tasks.filter(t=>t.st
 function ring(p){const r=6,c=2*Math.PI*r;return '<svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="'+r+'" fill="none" stroke="var(--line2)" stroke-width="2"/><circle cx="8" cy="8" r="'+r+'" fill="none" stroke="var(--done)" stroke-width="2" stroke-dasharray="'+(c*p)+' '+c+'" transform="rotate(-90 8 8)" stroke-linecap="round"/></svg>'}
 const pct=m=>{const n=m.tasks.filter(t=>t.state==='done').length;return m.tasks.length?Math.round(n/m.tasks.length*100):0}
 const TOKEN='__TOKEN__'
-let view='board',open=false,filter='all',last='',cache=null,seen=0,sel=null,menuOn=false
+let aboutOpen=true,view='board',open=false,filter='all',last='',cache=null,seen=0,sel=null,menuOn=false
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))
 const $=id=>document.getElementById(id)
 const tid=(m,t,i)=>t.id||('M'+m.id+'-'+(i+1))
@@ -233,6 +241,12 @@ function render(b){
     +ms.map(m=>'<button class="tab'+(filter===m.id?' on':'')+'" data-f="'+esc(m.id)+'">'+diamond(m)+'M'+esc(m.id)+' '+esc(m.name)+' <span class="p">'+pct(m)+'%</span></button>').join('')
     +'<span class="prog">'+ring(p)+doneN+'/'+allT.length+' 완료 · '+Math.round(p*100)+'%</span>'
   $('tabs').querySelectorAll('.tab').forEach(el=>el.onclick=()=>{filter=el.dataset.f;render(cache)})
+  const cur=filter==='all'?null:ms.find(m=>m.id===filter)
+  const row=(k,v)=>v?'<span>'+k+'</span><span>'+v+'</span>':''
+  const body=cur?row('목적',esc(cur.purpose))+row('하는 일',esc(cur.scope))+row('다 되면',esc(cur.doneWhen))
+    :row('목표',esc(b.goal))+ms.map(m=>row(diamond(m)+'M'+esc(m.id),'<b>'+esc(m.name)+'</b>'+(m.purpose||m.scope?' — '+esc(m.purpose||m.scope):''))).join('')
+  $('about').innerHTML='<summary><b>'+(cur?'M'+esc(cur.id)+' '+esc(cur.name):'골 개요')+'</b><span>'+(cur?'이 마일스톤이 하는 일':'목표와 마일스톤별 할 일')+'</span></summary><div class="ab">'+(body||'<span></span><span>PLAN.md에 설명이 없습니다</span>')+'</div>'
+  $('about').open=aboutOpen
   $('warn').innerHTML=(b.mismatch||[]).map(x=>'<div class="warn">⚠ '+esc(x)+'</div>').join('')
   const all=shown.flatMap(m=>m.tasks.map((t,i)=>[m,t,i])),pick=s=>all.filter(([,t])=>s.includes(t.state))
   const todo=pick(['todo']),doing=pick(['doing','waiting']).sort((a,c)=>(c[1].state==='waiting')-(a[1].state==='waiting')),done=pick(['done'])
@@ -242,13 +256,14 @@ function render(b){
   $('board').innerHTML=lane('todo',todo,cards(todo))+lane('doing',doing,cards(doing))+lane('done',done,doneBody)
   $('list').innerHTML=shown.map(m=>{const st=msState(m),n=m.tasks.filter(t=>t.state==='done').length
     const rows=m.status==='done'&&!open?'':m.tasks.map((t,i)=>'<div class="row '+t.state+'" data-k="'+esc(m.id+':'+i)+'">'+ICON[t.state]+'<span class="id">'+esc(tid(m,t,i))+'</span><span class="tx">'+esc(t.text)+'</span>'+(t.state==='waiting'?'<span class="pill urgent">'+URGENT+'사람 확인</span>':'<span class="pill">'+LABEL[t.state]+'</span>')+'</div>').join('')
-    return '<div class="gh" style="'+tint(st)+'">'+diamond(m,13)+'M'+esc(m.id)+' '+esc(m.name)+'<span class="c">'+m.tasks.length+'</span><span class="pc">'+n+'/'+m.tasks.length+' · '+pct(m)+'%</span></div>'+rows}).join('')
+    return '<div class="gh" style="'+tint(st)+'">'+diamond(m,13)+'M'+esc(m.id)+' '+esc(m.name)+'<span class="c">'+m.tasks.length+'</span><span class="pc">'+n+'/'+m.tasks.length+' · '+pct(m)+'%</span>'+(m.purpose||m.scope?'<span class="ab">'+esc(m.purpose||m.scope)+'</span>':'')+'</div>'+rows}).join('')
   const legacy=ms.length&&ms.every(m=>m.source==='legacy')
   seen=b.touched
   $('foot').innerHTML=(legacy?'<span>점선 카드는 마일스톤 기록에서 추정한 작업</span>':'')+(b.lastValidation?'<span>최근 검증 · '+esc(b.lastValidation)+'</span>':'')+'<span id="ago"></span><span class="d">'+esc(b.dir)+'</span>'
   document.querySelectorAll('[data-k]').forEach(el=>el.onclick=()=>openPeek(el.dataset.k))
   renderLink(b);if(sel)renderPeek()
   ago()}
+$('about').addEventListener('toggle',()=>{aboutOpen=$('about').open})
 function findTask(k){if(!cache||!k)return null;const [mid,i]=k.split(':'),m=cache.milestones.find(x=>x.id===mid);return m&&m.tasks[+i]?{m,t:m.tasks[+i],i:+i}:null}
 function renderLink(b){const on=!!b.paseo;$('lk').classList.toggle('hidden',!on);if(!on)return
   const l=b.link;$('lkd').className='dot '+(l?l.status:'none');$('lkn').textContent=l?l.name:'세션 연결 안 됨';$('lkb').title=l?'메시지를 받을 골 작업 세션: '+l.name+' ('+(l.status==='running'?'작업 중':'대기 중')+')':'메시지를 받을 세션을 고르세요'
@@ -278,6 +293,7 @@ function renderPeek(fresh){const x=findTask(sel);if(!x){closePeek();return}
     :lastS?'<div class="banner"><span class="dot idle"></span><span>마지막으로 보낸 것: <b>'+esc(lastS.label||'메시지')+'</b> · '+new Date(lastS.at).toLocaleTimeString()+' · 세션 답변 끝남</span></div>':''
   $('pb').innerHTML='<h2 class="pt">'+esc(x.t.text)+'</h2>'
    +'<div class="kv"><span>상태</span><span class="v">'+ICON[x.t.state]+LABEL[x.t.state]+(x.t.inferred?' (추정)':'')+'</span><span>마일스톤</span><span class="v">'+diamond(x.m)+'M'+esc(x.m.id)+' '+esc(x.m.name)+' · '+pct(x.m)+'%</span>'
+   +(x.m.purpose||x.m.scope?'<span>마일스톤 목적</span><span class="v">'+esc(x.m.purpose||x.m.scope)+'</span>':'')
    +(cache.paseo?'<span>보낼 곳</span><span class="v"><span class="dot '+(l?esc(l.status):'none')+'"></span>'+(l?esc(l.name):'연결 안 됨')+'</span>':'')+'</div>'
    +(cache.paseo?(l?'':'<div class="nolink">위쪽 「세션 연결 안 됨」을 눌러 이 골을 작업하는 세션을 고르면 여기서 바로 지시를 보낼 수 있습니다.</div>')
      +'<div class="sec">빠른 행동</div>'+banner+'<div class="acts">'+acts+'</div>'
