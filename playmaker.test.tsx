@@ -324,6 +324,20 @@ for (const c of [
   })
 }
 
+for (const c of [
+  { name: '골 본문', args: 'PLAN.md를 끝낼 때까지 멈추지 않는다', files: NEW, opens: true },
+  { name: '/goal clear', args: 'clear', files: NEW, opens: false },
+  { name: '골 폴더 없음', args: '무언가를 끝낸다', files: {}, opens: false },
+]) {
+  test(`/goal 실행 자동 열림: ${c.name} → ${c.opens ? '열림' : '안 열림'}`, async ($, on) => {
+    const opened = mockEngine(on, c.files)
+    on('command.run', { command: 'goal' }, () => ({ text: 'goal-core' }))
+    const text = JSON.stringify(await $.command.run({ ...RUN, command: 'goal', args: c.args }))
+    expect(text).toContain('goal-core')
+    expect(opened.length).toBe(c.opens ? 1 : 0)
+  })
+}
+
 test('터미널 카드 누르기: 아래에 행동 줄이 펼쳐지고, 버튼으로 이 세션에 지시, 답이 끝날 때까지 잠금', async ($, on) => {
   mockEngine(on, NEW)
   const submitted: string[] = []

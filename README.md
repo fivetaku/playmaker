@@ -36,7 +36,7 @@ goaljaby scores the goal; playmaker reads the whole pitch. playmaker is a Claude
 /playmaker
 ```
 
-playmaker looks two levels down from the current folder and opens the goal folder that changed most recently. If a goal is in progress and was touched in the last 7 days, the board opens by itself when the session starts.
+playmaker looks two levels down from the current folder and opens the goal folder that changed most recently. If a goal is in progress and was touched in the last 7 days, the board opens by itself when the session starts. It also opens when you start a goal with `/goal` (including the `/goal` goaljaby sends after you approve).
 
 ---
 

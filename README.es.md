@@ -36,7 +36,7 @@ goaljaby marca el gol; playmaker lee todo el partido. playmaker es un mod de Cla
 /playmaker
 ```
 
-playmaker busca hasta dos niveles por debajo de la carpeta actual y abre la carpeta de objetivo modificada más recientemente. Si hay un objetivo en curso modificado en los últimos 7 días, el tablero se abre solo al iniciar la sesión.
+playmaker busca hasta dos niveles por debajo de la carpeta actual y abre la carpeta de objetivo modificada más recientemente. Si hay un objetivo en curso modificado en los últimos 7 días, el tablero se abre solo al iniciar la sesión. También se abre al empezar un objetivo con `/goal` (incluido el `/goal` que goaljaby envía tras tu aprobación).
 
 ---
 

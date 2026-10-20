@@ -289,6 +289,26 @@ export const register: Register = on => {
     return { element: e.element, value: '' }
   })
 
+  // /goal로 골을 시작하면(골잡이 승인 뒤 자동 /goal 포함) 그 골 폴더의 보드를 연다.
+  // /goal clear 같은 관리 명령은 건너뛰고, 보드를 못 열어도 /goal 자체는 그대로 돈다
+  on('command.run', { command: 'goal' }, async ($, e, next) => {
+    const r = await next(e)
+    const args = e.args.trim()
+    if (!args || /^(clear|stop|cancel|off|status|pause|resume)$/i.test(args)) return r
+    try {
+      const dir = await locate($, '')
+      if (dir) {
+        const b = await refresh($, dir, true)
+        last = await stamp($, dir)
+        if (!b.allDone) {
+          void $.ui.open({ id: PANE, title: TITLE })
+          if (await isPaseo($)) void webText($, dir, true, 'auto').catch(noop)
+        }
+      }
+    } catch { /* 보드는 /playmaker로 따로 열 수 있다 */ }
+    return r
+  })
+
   on('command.run', { command: 'playmaker' }, async ($, e) => {
     const web = /^web(\s|$)/.test(e.args.trim())
     const dir = await locate($, web ? e.args.trim().slice(3) : e.args)
