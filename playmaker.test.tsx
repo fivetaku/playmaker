@@ -237,6 +237,13 @@ test('명령 web: 서버 실패 시 원인 출력', async ($, on) => {
   expect(text).toContain('node를 찾지 못했습니다')
 })
 
+test('명령: commands/playmaker.md로 들어온 이름(playmaker:playmaker)도 보드를 연다', async ($, on) => {
+  const opened = mockEngine(on, NEW)
+  const text = JSON.stringify(await $.command.run({ ...RUN, command: 'playmaker:playmaker' }))
+  expect(text).toContain('골 1/3 · 진행 M2')
+  expect(opened).toEqual(['playmaker'])
+})
+
 test('명령: 골 폴더 없음', async ($, on) => {
   mockEngine(on, {})
   expect(JSON.stringify(await $.command.run(RUN))).toContain('골 폴더를 찾지 못했습니다')

@@ -198,12 +198,32 @@ function cardsOf(b: Board, states: TaskState[]): Card[] {
   )
 }
 
+// /playmaker 본체. 보드를 연 골 폴더의 스탬프(at)를 함께 돌려줘 폴링 기준을 맞춘다
+async function boardCommand($: any, e: any): Promise<{ text: string; at?: string }> {
+  const web = /^web(\s|$)/.test(e.args.trim())
+  const dir = await locate($, web ? e.args.trim().slice(3) : e.args)
+  if (web) {
+    if (!dir) return { text: '골 폴더를 찾지 못했습니다. /playmaker web <경로>' }
+    return { text: await webText($, dir, await isPaseo($)) }
+  }
+  if (!dir) return { text: '골 폴더를 찾지 못했습니다. PLAN.md와 PROGRESS.md가 있는 폴더 경로를 인자로 주세요: /playmaker <경로>' }
+  const b = await refresh($, dir, true)
+  const at = await stamp($, dir)
+  await $.ui.open({ id: PANE, title: TITLE })
+  // Paseo: 보드는 옆 웹 탭이 보여 주므로 채팅에는 한 줄 요약과 탭 상태만 남긴다. 웹을 못 켜면 마크다운 보드로 대신한다
+  if (await isPaseo($)) {
+    const w = await webLine($, dir)
+    return { text: w ? `**${summaryLine(b)}**\n\n${w}` : summaryText(b), at }
+  }
+  return { text: summaryText(b), at }
+}
+
 export const register: Register = on => {
   let last = ''
   let timer: { cancel: () => void } | null = null
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'playmaker', description: '골 진행 보드 열기 (인자: 골 폴더 경로 · web: 브라우저 보드)' })
+    // /playmaker는 commands/playmaker.md가 선언한다. 세션에서 다시 등록하면 목록에 두 번 뜬다
     let dir: string | null = null
     try { dir = await locate($, '') } catch { dir = null }
     if (dir) {
@@ -309,24 +329,10 @@ export const register: Register = on => {
     return r
   })
 
-  on('command.run', { command: 'playmaker' }, async ($, e) => {
-    const web = /^web(\s|$)/.test(e.args.trim())
-    const dir = await locate($, web ? e.args.trim().slice(3) : e.args)
-    if (web) {
-      if (!dir) return { text: '골 폴더를 찾지 못했습니다. /playmaker web <경로>' }
-      return { text: await webText($, dir, await isPaseo($)) }
-    }
-    if (!dir) return { text: '골 폴더를 찾지 못했습니다. PLAN.md와 PROGRESS.md가 있는 폴더 경로를 인자로 주세요: /playmaker <경로>' }
-    const b = await refresh($, dir, true)
-    last = await stamp($, dir)
-    await $.ui.open({ id: PANE, title: TITLE })
-    // Paseo: 보드는 옆 웹 탭이 보여 주므로 채팅에는 한 줄 요약과 탭 상태만 남긴다. 웹을 못 켜면 마크다운 보드로 대신한다
-    if (await isPaseo($)) {
-      const w = await webLine($, dir)
-      return { text: w ? `**${summaryLine(b)}**\n\n${w}` : summaryText(b) }
-    }
-    return { text: summaryText(b) }
-  })
+  // /playmaker는 commands/playmaker.md로도 선언돼 있어서(세션 시작 전 앱 명령 목록용) 실행 이름이
+  // `playmaker:playmaker`로 들어온다. 두 이름 모두 여기서 받아 본문(대체 지시) 대신 보드를 연다
+  on('command.run', { command: 'playmaker' }, async ($, e) => { const r = await boardCommand($, e); if (r.at) last = r.at; return { text: r.text } })
+  on('command.run', { command: 'playmaker:playmaker' }, async ($, e) => { const r = await boardCommand($, e); if (r.at) last = r.at; return { text: r.text } })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button, Input, Link } = $.ui.resolve(e)
