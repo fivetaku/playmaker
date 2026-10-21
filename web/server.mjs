@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 // playmaker 웹 보기 — 화면을 그리지 않는 호스트(Paseo 등)용 실시간 보드.
-// 의존성 없음. 127.0.0.1에만 열고, 시작할 때 받은 골 폴더 하나의 PLAN.md·PROGRESS.md만 읽는다(쓰지 않는다).
+// 의존성 없음. 127.0.0.1에만 열고, 시작할 때 받은 골 폴더 하나의 PLAN.md·PROGRESS.md(+ insane-loop LOOP.md)만 읽는다(쓰지 않는다).
 // Paseo에서는 골 작업 세션에 연결해 카드에서 그 세션으로 메시지를 보낼 수 있다(`paseo send`).
 // 사용: node server.mjs --dir <골 폴더> [--port 4777] [--port-file <경로>] [--paseo <paseo CLI> --project <에이전트 cwd> --agent <ID>]
 import { createServer } from 'node:http'
 import { execFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { resolve } from 'node:path'
-import { parseBoard, summaryLine } from '../hooks/parse.ts'
+import { dirname, join, resolve } from 'node:path'
+import { loopGate, loopInfo, parseBoard, parseLoop, summaryLine } from '../hooks/parse.ts'
 
 const args = Object.fromEntries(
   process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1]]] : acc), []),
@@ -25,12 +25,24 @@ let port = FIRST
 let link = args.agent ? { agentId: args.agent, by: 'start' } : null
 const sent = [] // 보낸 메시지 기록 (최근 30건, 메모리에만)
 
+// insane-loop 저널: 골 폴더 → 위로 2단계까지에서 처음 찾은 LOOP.md. 못 읽으면 null(루프 표시만 빠진다)
+function loop() {
+  try {
+    for (const d of new Set([DIR, dirname(DIR), dirname(dirname(DIR))])) {
+      const p = join(d, 'LOOP.md')
+      if (existsSync(p)) return parseLoop(readFileSync(p, 'utf8'))
+    }
+  } catch { /* 루프 표시 없이 보드만 */ }
+  return null
+}
+
 function board() {
   const plan = readFileSync(`${DIR}/PLAN.md`, 'utf8')
   const progress = readFileSync(`${DIR}/PROGRESS.md`, 'utf8')
   const b = parseBoard(DIR, plan, progress, Date.now())
   const touched = Math.max(statSync(`${DIR}/PLAN.md`).mtimeMs, statSync(`${DIR}/PROGRESS.md`).mtimeMs)
-  return { ...b, summary: summaryLine(b), touched }
+  const l = loop()
+  return { ...b, summary: summaryLine(b), touched, ...(l ? { loop: l, loopInfo: loopInfo(l), loopGate: loopGate(l) } : {}) }
 }
 
 const run = (cmd, argv, ms = 8000) => new Promise((ok, fail) =>
@@ -123,6 +135,8 @@ kbd{font:10.5px var(--font);color:var(--faint);border:1px solid var(--line2);bor
 .tab:hover{background:var(--card-h);color:var(--fg2)}.tab.on{background:var(--card);border-color:var(--line2);color:var(--fg)}
 .tab .p{color:var(--faint);font-variant-numeric:tabular-nums}.tab svg{flex:none}
 .prog{margin-left:auto;display:flex;align-items:center;gap:7px;color:var(--dim);white-space:nowrap;font-variant-numeric:tabular-nums;padding-left:12px}
+.loopbar{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;padding:7px 12px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--fg2)}
+.loopbar.done{color:var(--done)}.loopbar.gate{background:color-mix(in srgb,var(--wait) 12%,transparent)}.loopbar .gq{color:var(--wait);font-weight:600}
 .warn{margin:8px 12px 0;padding:7px 10px;border-radius:6px;font-size:12px;color:var(--fg2);background:color-mix(in srgb,var(--wait) 10%,transparent);border:1px solid color-mix(in srgb,var(--wait) 28%,transparent)}
 /* 골·마일스톤 개요 */
 .about{margin:8px 12px 0;border:1px solid var(--line);border-radius:8px;background:var(--lane);font-size:12.5px}
@@ -199,6 +213,7 @@ main{flex:1;overflow:auto}
   <button class="ib" id="vDone" title="완료 작업 펼치기 (D)">완료 펼치기 <kbd>D</kbd></button>
   <div class="vs"><button id="vBoard" class="on" title="보드 (1)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2.5" width="3.3" height="11" rx="1"/><rect x="6.35" y="2.5" width="3.3" height="7.5" rx="1"/><rect x="10.7" y="2.5" width="3.3" height="9.5" rx="1"/></svg>보드</button><button id="vList" title="리스트 (2)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M5.5 4h8M5.5 8h8M5.5 12h8"/><circle cx="2.6" cy="4" r=".6" fill="currentColor"/><circle cx="2.6" cy="8" r=".6" fill="currentColor"/><circle cx="2.6" cy="12" r=".6" fill="currentColor"/></svg>리스트</button></div>
 </header>
+<div class="loopbar hidden" id="loop"></div>
 <nav class="tabs" id="tabs"></nav>
 <div id="warn"></div>
 <details class="about" id="about" open></details>
@@ -247,6 +262,8 @@ function render(b){
     :row('목표',esc(b.goal))+ms.map(m=>row(diamond(m)+'M'+esc(m.id),'<b>'+esc(m.name)+'</b>'+(m.purpose||m.scope?' — '+esc(m.purpose||m.scope):''))).join('')
   $('about').innerHTML='<summary><b>'+(cur?'M'+esc(cur.id)+' '+esc(cur.name):'골 개요')+'</b><span>'+(cur?'이 마일스톤이 하는 일':'목표와 마일스톤별 할 일')+'</span></summary><div class="ab">'+(body||'<span></span><span>PLAN.md에 설명이 없습니다</span>')+'</div>'
   $('about').open=aboutOpen
+  const L=b.loop;$('loop').className='loopbar'+(L?'':' hidden')+(L&&L.status==='done'?' done':'')+(b.loopGate?' gate':'')
+  $('loop').innerHTML=L?(b.loopGate?'<span class="gq">'+esc(b.loopGate)+'</span>':'')+'<span>'+esc(b.loopInfo)+'</span>':''
   $('warn').innerHTML=(b.mismatch||[]).map(x=>'<div class="warn">⚠ '+esc(x)+'</div>').join('')
   const all=shown.flatMap(m=>m.tasks.map((t,i)=>[m,t,i])),pick=s=>all.filter(([,t])=>s.includes(t.state))
   const todo=pick(['todo']),doing=pick(['doing','waiting']).sort((a,c)=>(c[1].state==='waiting')-(a[1].state==='waiting')),done=pick(['done'])
@@ -277,6 +294,12 @@ const ACTS={
  doing:[['진행 상황 알려줘','이 작업을 지금 어디까지 했고 남은 게 무엇인지 짧게 알려 주세요.',1],['막힌 게 있나?','이 작업에서 막힌 부분이 있으면 무엇이 필요한지 알려 주세요. 없으면 계속 진행해 주세요.']],
  todo:[['이것부터 해','이 작업을 다음 작업으로 먼저 진행해 주세요.',1],['계획 설명해','이 작업을 어떻게 할 계획인지 짧게 설명해 주세요. 아직 시작하지는 마세요.']],
  done:[['결과 보여줘','이 작업의 결과물과 확인 방법을 짧게 알려 주세요.',1],['다시 검증해','이 작업이 실제로 끝났는지 다시 검증하고 결과를 알려 주세요. 문제가 있으면 마커를 [>]로 되돌려 주세요.']]}
+// insane-loop가 붙은 골(LOOP.md)에서만 뒤에 덧붙는 행동. hooks/parse.ts의 LOOP_ACTIONS와 같은 문구
+const LOOP_ACTS={
+ waiting:[['gate 답하기','insane-loop가 기다리는 판단 질문(LOOP.md gate_pending)을 보여 주세요. 제가 답하면 그 답으로 PLAN·PRD를 갱신하고 /insane-loop로 재진입해 이어가 주세요.']],
+ doing:[['접근 바꿔서 다시','이 작업을 insane-loop 사다리 2단으로 처리해 주세요. LOOP.md의 reviewer 설정으로 접근을 바꿔 다시 시도하고 회차 기록을 남겨 주세요.']],
+ done:[['DoD 다시 판정','VALIDATION 전체를 다시 실행해 insane-loop DoD(전체 통과 + blocking 가정 0)를 판정하고 LOOP.md에 회차로 기록해 주세요.']]}
+const actsOf=s=>(ACTS[s]||[]).concat(cache&&cache.loop?LOOP_ACTS[s]||[]:[])
 function msgFor(x,body){return '[playmaker · '+tid(x.m,x.t,x.i)+'] '+x.t.text+'\\n(M'+x.m.id+' '+x.m.name+' · 지금 상태: '+LABEL[x.t.state]+')\\n\\n'+body}
 function openPeek(k){sel=k;$('peek').classList.add('on');renderPeek(true);document.querySelectorAll('.card').forEach(el=>el.classList.toggle('sel',el.dataset.k===k))}
 function closePeek(){sel=null;$('peek').classList.remove('on');document.querySelectorAll('.card.sel').forEach(el=>el.classList.remove('sel'))}
@@ -287,7 +310,7 @@ function renderPeek(fresh){const x=findTask(sel);if(!x){closePeek();return}
   // 보낸 뒤 세션이 답을 마칠 때까지(작업 중 → 대기) 이 작업의 빠른 행동은 잠근다. 반대 지시가 연달아 들어가는 것 방지
   const pending=!!(lastS&&l&&(l.status==='running'||Date.now()-lastS.at<8000))
   const busy=!!(l&&l.status==='running'&&!pending)
-  const acts=(ACTS[x.t.state]||[]).map(([label,body,pri],j)=>{const done=mine.some(s=>s.label===label);return '<button class="act'+(pri&&!done?' primary':'')+'" data-j="'+j+'"'+(l&&!pending?'':' disabled')+'>'+label+(done?'<span class="ok">✓ 보냄</span>':'<small>보내기</small>')+'</button>'}).join('')
+  const acts=actsOf(x.t.state).map(([label,body,pri],j)=>{const done=mine.some(s=>s.label===label);return '<button class="act'+(pri&&!done?' primary':'')+'" data-j="'+j+'"'+(l&&!pending?'':' disabled')+'>'+label+(done?'<span class="ok">✓ 보냄</span>':'<small>보내기</small>')+'</button>'}).join('')
   const banner=pending?'<div class="banner"><span class="dot running"></span><span><b>'+esc(lastS.label||'메시지')+'</b>를 보냈습니다 · '+new Date(lastS.at).toLocaleTimeString()+'<br>세션이 답하는 중입니다. 답이 끝나면 다시 보낼 수 있습니다.</span></div>'
     :busy?'<div class="banner busy"><span class="dot running"></span><span>연결된 세션이 지금 다른 작업 중입니다. 보내면 하던 일 사이에 끼어들 수 있습니다.</span></div>'
     :lastS?'<div class="banner"><span class="dot idle"></span><span>마지막으로 보낸 것: <b>'+esc(lastS.label||'메시지')+'</b> · '+new Date(lastS.at).toLocaleTimeString()+' · 세션 답변 끝남</span></div>':''
@@ -301,7 +324,7 @@ function renderPeek(fresh){const x=findTask(sel);if(!x){closePeek();return}
      +(mine.length?'<div class="sec">보낸 메시지</div><div class="log">'+mine.map(s=>'<div><time>'+new Date(s.at).toLocaleTimeString()+' → '+esc(s.to)+'</time>'+esc(s.label?s.label:s.text.split('\\n\\n').slice(1).join('\\n\\n'))+'</div>').join('')+'</div>':'')
     :'<div class="nolink">세션 연결은 Paseo에서 쓸 수 있습니다. 터미널에서는 이 내용을 직접 세션에 입력하세요.</div>')
   if($('ta')){$('ta').value=draft;$('ta').onkeydown=e=>{if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){e.preventDefault();$('sendb').click()}}}
-  $('pb').querySelectorAll('[data-j]').forEach(el=>el.onclick=()=>{if(el.disabled)return;const a=ACTS[x.t.state][+el.dataset.j];doSend(msgFor(x,a[1]),false,id,a[0])})
+  $('pb').querySelectorAll('[data-j]').forEach(el=>el.onclick=()=>{if(el.disabled)return;const a=actsOf(x.t.state)[+el.dataset.j];doSend(msgFor(x,a[1]),false,id,a[0])})
   if($('sendb'))$('sendb').onclick=()=>{const v=$('ta').value.trim();if(v&&!pending)doSend(msgFor(x,v),true,id,'')}}
 let sending=false
 async function doSend(text,clear,task,label){if(sending)return;sending=true;try{const r=await post('api/send',{text,task,label});if(r.error)return toast('보내지 못했습니다: '+r.error,true);toast(r.to+' 세션에 보냈습니다');if(clear&&$('ta'))$('ta').value='';last='';await tick()}catch(e){toast('보내지 못했습니다',true)}finally{sending=false}}

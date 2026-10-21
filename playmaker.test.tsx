@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'claude-code/testing'
-import { about, parseBoard, summaryLine, summaryText } from './hooks/parse'
+import { about, loopLine, parseBoard, parseLoop, summaryLine, summaryText } from './hooks/parse'
 
 // ── fixtures ────────────────────────────────────────────────
 // goaljaby 0.7+ 체크리스트 형식
@@ -425,4 +425,133 @@ test('터미널 패널: 닫기는 pane을 닫고 입력창 위 요약 줄도 내
   const band: any = await $.ui.mount({ plugin: 'playmaker', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 3, bodyColumns: 80 } as any })
   expect(await band.find({ type: 'Text', text: /engine-base/ })).toBeDefined()
   expect(await band.find({ type: 'Text', text: /골 1\/3/ })).toBeUndefined()
+})
+
+// ── insane-loop 저널(LOOP.md) ───────────────────────────────
+const LOOP = `# insane-loop 저널: 인증 MVP
+
+- status: active
+- dod: VALIDATION 전체 통과 + blocking 가정 0
+- prd: PRD/01_PRD.md / validation: VALIDATION.md
+- reviewer: codex (사다리2단)
+- redrive: none
+- blocking_assumptions_remaining: [2]
+
+## 회차 1 — 2026-10-20
+- 검증: 통과 1/5 / 실패 항목: A2, A3, A4, A5
+- 사다리 단계: 1 / 리뷰어: self
+- 적용 태스크: 스캐폴딩
+- 판정: 계속
+
+## 회차 2 — 2026-10-21
+- 검증: 통과 3/5 / 실패 항목: A4, A5
+- 사다리 단계: 2 / 리뷰어: codex
+- 적용 태스크: OAuth 콜백
+- 판정: 계속
+`
+const LOOP_GATE = LOOP.replace('- status: active', '- status: gate_pending').replace(/- 판정: 계속\n$/, '- 판정: gate_pending: 운영 계정을 실계정으로 쓸까요, 테스트 계정으로 쓸까요?\n')
+const LOOP_DONE = LOOP.replace('- status: active', '- status: done').replace('통과 3/5 / 실패 항목: A4, A5', '통과 5/5').replace(/- 판정: 계속\n$/, '- 판정: done\n')
+const LOOP_BROKEN = `# 메모\n\n아무 형식 없는 글입니다. status 줄도 회차도 없습니다.\n\n- 그냥 목록\n`
+
+describe('LOOP.md 파서', () => {
+  test('마지막 회차의 검증·사다리·리뷰어', () => {
+    expect(parseLoop(LOOP)).toEqual({ status: 'active', round: 2, passed: 3, total: 5, ladder: 2, reviewer: 'codex', gateQuestion: '' })
+    expect(loopLine(parseLoop(LOOP)!)).toBe('루프 회차 2 · 검증 3/5 · 사다리 2단')
+  })
+
+  test('gate_pending: 판정 줄의 질문을 앞에', () => {
+    const l = parseLoop(LOOP_GATE)!
+    expect(l.status).toBe('gate_pending')
+    expect(l.gateQuestion).toBe('운영 계정을 실계정으로 쓸까요, 테스트 계정으로 쓸까요?')
+    expect(loopLine(l)).toBe('⏸ 판단 대기: 운영 계정을 실계정으로 쓸까요, 테스트 계정으로 쓸까요? · 루프 회차 2 · 검증 3/5 · 사다리 2단')
+  })
+
+  test('done: 루프 완료', () => {
+    expect(loopLine(parseLoop(LOOP_DONE)!)).toBe('루프 완료 · 회차 2 · 검증 5/5 · 사다리 2단')
+  })
+
+  test('흔들린 형식: 굵게·영어 키·### 회차·코드 펜스 안은 무시', () => {
+    const t = '# loop\n\n- **status**: `gate_pending`\n\n```\n## 회차 9\n```\n\n### Round 4 — 2026-10-21\n- **Validation**: 2/7\n- Ladder: stage 3\n- Verdict: gate_pending — 배포를 미룰까요?\n'
+    expect(parseLoop(t)).toEqual({ status: 'gate_pending', round: 4, passed: 2, total: 7, ladder: 3, reviewer: '', gateQuestion: '배포를 미룰까요?' })
+  })
+
+  test('깨진 형식·빈 파일은 null (보드는 루프 없이)', () => {
+    expect(parseLoop(LOOP_BROKEN)).toBeNull()
+    expect(parseLoop('')).toBeNull()
+  })
+
+  test('status 줄이 없어도 회차 판정에서 상태를 짐작', () => {
+    expect(parseLoop(LOOP_GATE.replace('- status: gate_pending\n', ''))!.status).toBe('gate_pending')
+  })
+})
+
+const withLoop = (loop: string, at = '/w/goal/LOOP.md') => ({ ...NEW, [at]: loop })
+
+test('LOOP.md 없음: 루프 줄도 루프 행동도 없다', async ($, on) => {
+  mockEngine(on, NEW)
+  const text = JSON.stringify(await $.command.run(RUN))
+  expect(text).not.toContain('루프')
+  const ui: any = await $.ui.mount(pane('terminal', 90))
+  expect(await ui.find({ type: 'Text', text: /루프/ })).toBeUndefined()
+  await ui.press({ key: 't:2:1' })
+  expect(JSON.stringify(await ui.drawn())).not.toContain('gate 답하기')
+  expect(await ui.find({ type: 'Button', key: 'a:2:1:3' })).toBeUndefined()
+})
+
+test('LOOP.md 있음(골 폴더 위 1단계): 텍스트 요약·pane·band에 회차 줄', async ($, on) => {
+  mockEngine(on, withLoop(LOOP, '/w/LOOP.md'))
+  on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => { const { Text } = $.ui.resolve(e); return <Text>engine-base</Text> })
+  const text = JSON.stringify(await $.command.run(RUN))
+  expect(text).toContain('루프 회차 2 · 검증 3/5 · 사다리 2단')
+  expect(text).toContain('골 1/3 · 진행 M2')
+  const ui: any = await $.ui.mount(pane('terminal', 90))
+  expect(await ui.find({ type: 'Text', text: /^루프 회차 2 · 검증 3\/5 · 사다리 2단$/ })).toBeDefined()
+  const band: any = await $.ui.mount({ plugin: 'playmaker', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 3, bodyColumns: 80 } as any })
+  expect(await band.find({ type: 'Text', text: /골 1\/3/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /루프 회차 2/ })).toBeDefined()
+})
+
+test('LOOP.md gate_pending: 판단 대기 질문을 눈에 띄게, gate 답하기 행동으로 지시', async ($, on) => {
+  mockEngine(on, withLoop(LOOP_GATE))
+  const submitted: string[] = []
+  on('prompt.submit', ($: any, e: any) => { submitted.push(e.text); return { text: e.text } })
+  const text = JSON.stringify(await $.command.run(RUN))
+  expect(text).toContain('**⏸ 판단 대기: 운영 계정을 실계정으로 쓸까요, 테스트 계정으로 쓸까요?**')
+  const ui: any = await $.ui.mount(pane('terminal', 90))
+  const gate: any = await ui.find({ type: 'Text', text: /^⏸ 판단 대기: 운영 계정/ })
+  expect(gate).toBeDefined()
+  expect(gate.props.bold).toBe(true)
+  await ui.press({ key: 't:2:1' })
+  expect(JSON.stringify(await ui.drawn())).toContain('승인하고 진행') // 기존 행동은 그대로
+  expect(await ui.find({ type: 'Button', key: 'a:2:1:3' })).toBeDefined()
+  await ui.press({ key: 'a:2:1:3' })
+  expect(submitted.length).toBe(1)
+  expect(submitted[0]).toContain('[playmaker · M2-T2]')
+  expect(submitted[0]).toContain('/insane-loop로 재진입해 이어가 주세요')
+})
+
+test('LOOP.md 있음: 진행 카드는 접근 바꿔서 다시, 완료 카드는 DoD 다시 판정', async ($, on) => {
+  mockEngine(on, withLoop(LOOP))
+  await $.command.run(RUN)
+  const ui: any = await $.ui.mount(pane('terminal', 90))
+  await ui.press({ key: 't:2:0' })
+  expect(JSON.stringify(await ui.drawn())).toContain('접근 바꿔서 다시')
+  await ui.press({ key: 'done' })
+  await ui.press({ key: 't:1:0' })
+  expect(JSON.stringify(await ui.drawn())).toContain('DoD 다시 판정')
+})
+
+test('LOOP.md done: 루프 완료', async ($, on) => {
+  mockEngine(on, withLoop(LOOP_DONE))
+  expect(JSON.stringify(await $.command.run(RUN))).toContain('루프 완료 · 회차 2 · 검증 5/5')
+})
+
+test('LOOP.md 깨진 형식: 루프 표시만 빠지고 보드는 그대로', async ($, on) => {
+  mockEngine(on, withLoop(LOOP_BROKEN))
+  const text = JSON.stringify(await $.command.run(RUN))
+  expect(text).toContain('골 1/3 · 진행 M2')
+  expect(text).not.toContain('루프')
+  const ui: any = await $.ui.mount(pane('terminal', 90))
+  expect(await ui.find({ type: 'Text', text: /^대기 \(2\)$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /루프/ })).toBeUndefined()
 })

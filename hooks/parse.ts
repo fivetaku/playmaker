@@ -1,4 +1,4 @@
-import type { Board, Milestone, Task, TaskState } from '../types'
+import type { Board, Loop, Milestone, Task, TaskState } from '../types'
 
 // goaljaby canonical headings (templates.md §헤딩 맵): ko / en
 const H = {
@@ -233,6 +233,7 @@ export function summaryText(b: Board): string {
   })
   return [
     `**${summaryLine(b)}**`,
+    ...(b.loop ? [loopInfo(b.loop), loopGate(b.loop) ? `**${loopGate(b.loop)}**` : ''] : []),
     b.goal ? `> ${b.goal}` : '',
     table.join('\n'),
     ms.join('\n\n'),
@@ -263,6 +264,18 @@ export const ACTIONS: Record<TaskState, [label: string, body: string][]> = {
   ],
 }
 
+// insane-loop가 붙은 골에서만 덧붙는 카드 행동. 웹 보기의 LOOP_ACTS와 같은 문구를 쓴다
+export const LOOP_ACTIONS: Partial<Record<TaskState, [label: string, body: string][]>> = {
+  waiting: [['gate 답하기', 'insane-loop가 기다리는 판단 질문(LOOP.md gate_pending)을 보여 주세요. 제가 답하면 그 답으로 PLAN·PRD를 갱신하고 /insane-loop로 재진입해 이어가 주세요.']],
+  doing: [['접근 바꿔서 다시', '이 작업을 insane-loop 사다리 2단으로 처리해 주세요. LOOP.md의 reviewer 설정으로 접근을 바꿔 다시 시도하고 회차 기록을 남겨 주세요.']],
+  done: [['DoD 다시 판정', 'VALIDATION 전체를 다시 실행해 insane-loop DoD(전체 통과 + blocking 가정 0)를 판정하고 LOOP.md에 회차로 기록해 주세요.']],
+}
+
+// 기존 행동 뒤에 루프 행동을 붙인다(번호가 밀리지 않게 항상 뒤에)
+export function actionsFor(state: TaskState, loop: boolean): [label: string, body: string][] {
+  return [...ACTIONS[state], ...(loop ? LOOP_ACTIONS[state] ?? [] : [])]
+}
+
 const STATE_LABEL: Record<TaskState, string> = { todo: '대기', doing: '진행', done: '완료', waiting: '사람 대기' }
 
 export function taskId(m: Milestone, t: Task, i: number): string {
@@ -271,4 +284,95 @@ export function taskId(m: Milestone, t: Task, i: number): string {
 
 export function actionMessage(m: Milestone, t: Task, i: number, body: string): string {
   return `[playmaker · ${taskId(m, t, i)}] ${t.text}\n(M${m.id} ${m.name} · 지금 상태: ${STATE_LABEL[t.state]})\n\n${body}`
+}
+
+// ── insane-loop 저널(LOOP.md) ───────────────────────────────
+// 형식이 조금 흔들려도(굵게, 영어 키, ### 회차) 읽는다. 루프 저널로 볼 근거(status 또는 회차)가 없으면 null
+const LOOP_STATUS: [RegExp, Loop['status']][] = [
+  [/^(?:gate[_\s-]?pending|gate|판단\s*대기)/i, 'gate_pending'],
+  [/^(?:done|complete[d]?|완료)/i, 'done'],
+  [/^(?:stopped|stop|중단|멈춤)/i, 'stopped'],
+  [/^(?:active|running|진행)/i, 'active'],
+]
+
+function loopStatus(v: string): Loop['status'] | null {
+  return LOOP_STATUS.find(([re]) => re.test(v.trim()))?.[1] ?? null
+}
+
+function gateOf(verdict: string): string | null {
+  const m = verdict.match(/gate[_\s-]?pending\s*[:：—\-]*\s*(.*)$/i)
+  return m ? clean(m[1]) : null
+}
+
+export function parseLoop(text: string): Loop | null {
+  type Round = { n: number; passed: number | null; total: number | null; ladder: number | null; reviewer: string; verdict: string }
+  let status: Loop['status'] | null = null
+  let reviewer = ''
+  const rounds: Round[] = []
+  let cur: Round | null = null
+  let fence = false
+  for (const raw of text.split('\n')) {
+    if (/^\s*(```|~~~)/.test(raw)) { fence = !fence; continue }
+    if (fence) continue
+    const line = raw.replace(/\*\*|__|`/g, '')
+    const head = line.match(/^#{2,4}\s*(?:회차|round)\s*(\d+)/i)
+    if (head) { cur = { n: Number(head[1]), passed: null, total: null, ladder: null, reviewer: '', verdict: '' }; rounds.push(cur); continue }
+    if (/^#{1,2}\s/.test(line)) { cur = null; continue }
+    const f = line.match(/^\s*[-*]\s+([^:：]+?)\s*[:：]\s*(.*)$/)
+    if (!f) continue
+    const key = f[1].trim().toLowerCase()
+    const value = f[2].trim()
+    if (!cur) {
+      if (key === 'status' || key === '상태') status = loopStatus(value) ?? status
+      else if (key === 'reviewer' || key === '리뷰어') reviewer = clean(value.replace(/\(.*?\)/g, ''))
+      continue
+    }
+    if (/^(?:검증|validation|verify|verification)$/.test(key)) {
+      const n = value.match(/(\d+)\s*\/\s*(\d+)/)
+      if (n) { cur.passed = Number(n[1]); cur.total = Number(n[2]) }
+    } else if (/^(?:사다리|ladder)/.test(key)) {
+      const st = value.match(/[123]/)
+      if (st) cur.ladder = Number(st[0])
+      const rv = value.match(/(?:리뷰어|reviewer)\s*[:：]\s*(.+)$/i)
+      if (rv) cur.reviewer = clean(rv[1])
+    } else if (/^(?:리뷰어|reviewer)$/.test(key)) {
+      cur.reviewer = clean(value)
+    } else if (/^(?:판정|verdict|decision)$/.test(key)) {
+      cur.verdict = clean(value)
+    }
+  }
+  const last = rounds[rounds.length - 1]
+  if (!status && !last) return null
+  if (!status) status = last.verdict && gateOf(last.verdict) !== null ? 'gate_pending' : /^(?:done|완료)/i.test(last.verdict) ? 'done' : 'active'
+  const gated = [...rounds].reverse().find(r => gateOf(r.verdict) !== null)
+  return {
+    status,
+    round: last?.n ?? 0,
+    passed: last?.passed ?? null,
+    total: last?.total ?? null,
+    ladder: last?.ladder ?? null,
+    reviewer: last?.reviewer || reviewer,
+    gateQuestion: status === 'gate_pending' && gated ? gateOf(gated.verdict) ?? '' : '',
+  }
+}
+
+// "루프 회차 3 · 검증 4/6 · 사다리 2단" / 끝났으면 "루프 완료 · 회차 5 · 검증 6/6"
+export function loopInfo(l: Loop): string {
+  const parts = l.status === 'done' ? ['루프 완료'] : l.status === 'stopped' ? ['루프 멈춤'] : []
+  if (l.round) parts.push(parts.length ? `회차 ${l.round}` : `루프 회차 ${l.round}`)
+  else if (!parts.length) parts.push('루프 회차 기록 없음')
+  if (l.total) parts.push(`검증 ${l.passed}/${l.total}`)
+  if (l.ladder) parts.push(`사다리 ${l.ladder}단`)
+  return parts.join(' · ')
+}
+
+// 사람 판단을 기다리면 "⏸ 판단 대기: 질문", 아니면 빈 문자열
+export function loopGate(l: Loop): string {
+  if (l.status !== 'gate_pending') return ''
+  return l.gateQuestion ? `⏸ 판단 대기: ${l.gateQuestion}` : '⏸ 판단 대기 (질문은 LOOP.md에)'
+}
+
+// 한 줄용(band): 판단 대기를 앞에 둬서 잘려도 질문이 보이게
+export function loopLine(l: Loop): string {
+  return [loopGate(l), loopInfo(l)].filter(Boolean).join(' · ')
 }

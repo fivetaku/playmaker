@@ -25,6 +25,22 @@ export type Milestone = {
   source: 'checklist' | 'legacy'
 }
 
+/** insane-loop 저널(LOOP.md)에서 읽은 루프 상태. 못 읽으면 Board에 붙지 않는다 */
+export type Loop = {
+  status: 'active' | 'gate_pending' | 'done' | 'stopped'
+  /** 마지막 회차 번호 (회차 기록이 없으면 0) */
+  round: number
+  /** 마지막 회차 검증 통과 수 / 전체 수 */
+  passed: number | null
+  total: number | null
+  /** 마지막 회차 사다리 단계 (1~3) */
+  ladder: number | null
+  /** 마지막 회차에 쓴 리뷰어, 없으면 머리말의 reviewer */
+  reviewer: string
+  /** 판정이 gate_pending일 때 사람에게 묻는 질문 */
+  gateQuestion: string
+}
+
 export type Board = {
   dir: string
   goal: string
@@ -39,6 +55,8 @@ export type Board = {
   active?: boolean
   /** band·자동 표시 여부 (자동: active, /playmaker 실행 시 항상) */
   show?: boolean
+  /** 골 폴더나 그 위 2단계에 insane-loop LOOP.md가 있고 읽을 수 있을 때만 */
+  loop?: Loop
 }
 
 declare module 'claude-code' {

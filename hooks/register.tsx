@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
-import type { Board, Milestone, Task, TaskState } from '../types'
-import { ACTIONS, about, actionMessage, counts, parseBoard, summaryLine, summaryText, taskId } from './parse'
+import type { Board, Loop, Milestone, Task, TaskState } from '../types'
+import { about, actionMessage, actionsFor, counts, loopGate, loopInfo, loopLine, parseBoard, parseLoop, summaryLine, summaryText, taskId } from './parse'
 
 const PANE = 'playmaker'
 const TITLE = '골 진행'
@@ -41,11 +41,11 @@ async function sendTask($: any, ms: Milestone, task: Task, i: number, label: str
   }
 }
 
-async function taskAt($: any, mid: string, i: number): Promise<{ ms: Milestone; task: Task } | null> {
+async function taskAt($: any, mid: string, i: number): Promise<{ ms: Milestone; task: Task; loop: boolean } | null> {
   const b = await read($, board)
   const ms = b?.milestones.find(x => x.id === mid)
   const task = ms?.tasks[i]
-  return ms && task ? { ms, task } : null
+  return ms && task ? { ms, task, loop: !!b?.loop } : null
 }
 
 async function isGoalDir($: any, dir: string): Promise<boolean> {
@@ -88,10 +88,32 @@ async function findGoalDir($: any, base: string): Promise<string | null> {
   return found[0]?.dir ?? null
 }
 
+// insane-loop 저널: 골 폴더 → 위로 2단계까지에서 처음 찾은 LOOP.md
+async function loopPath($: any, dir: string): Promise<string | null> {
+  const up = (d: string) => d.replace(/\/[^/]+\/?$/, '') || '/'
+  for (const d of [...new Set([dir, up(dir), up(up(dir))])]) {
+    const p = `${d === '/' ? '' : d}/LOOP.md`
+    try { if (await $.fs.exists(p)) return p } catch { /* 다음 후보 */ }
+  }
+  return null
+}
+
+// 못 읽거나 형식이 깨졌으면 null: 루프 표시만 빠지고 보드는 그대로
+async function loadLoop($: any, dir: string): Promise<Loop | null> {
+  try {
+    const p = await loopPath($, dir)
+    return p ? parseLoop(await $.fs.read(p)) : null
+  } catch {
+    return null
+  }
+}
+
 async function stamp($: any, dir: string): Promise<string> {
   const a = await $.fs.stat(`${dir}/PLAN.md`)
   const b = await $.fs.stat(`${dir}/PROGRESS.md`)
-  return `${a.mtimeMs}:${a.size}|${b.mtimeMs}:${b.size}`
+  let l = ''
+  try { const p = await loopPath($, dir); if (p) { const s = await $.fs.stat(p); l = `|${p}:${s.mtimeMs}:${s.size}` } } catch { /* LOOP.md 변화만 늦게 잡힘 */ }
+  return `${a.mtimeMs}:${a.size}|${b.mtimeMs}:${b.size}${l}`
 }
 
 async function refresh($: any, dir: string, show?: boolean): Promise<Board> {
@@ -99,6 +121,8 @@ async function refresh($: any, dir: string, show?: boolean): Promise<Board> {
   const progress = await $.fs.read(`${dir}/PROGRESS.md`)
   const now = await $.clock.now()
   const parsed = parseBoard(dir, plan, progress, now)
+  const loop = await loadLoop($, dir)
+  if (loop) parsed.loop = loop
   const age = Math.max(0, now - (await touchedAt($, dir)))
   const active = !parsed.allDone && age < ACTIVE_MS
   const prev = await read($, board)
@@ -213,7 +237,7 @@ async function boardCommand($: any, e: any): Promise<{ text: string; at?: string
   // Paseo: 보드는 옆 웹 탭이 보여 주므로 채팅에는 한 줄 요약과 탭 상태만 남긴다. 웹을 못 켜면 마크다운 보드로 대신한다
   if (await isPaseo($)) {
     const w = await webLine($, dir)
-    return { text: w ? `**${summaryLine(b)}**\n\n${w}` : summaryText(b), at }
+    return { text: w ? [`**${summaryLine(b)}**`, ...(b.loop ? [loopLine(b.loop)] : []), w].join('\n\n') : summaryText(b), at }
   }
   return { text: summaryText(b), at }
 }
@@ -296,7 +320,7 @@ export const register: Register = on => {
       return
     }
     const hit = await taskAt($, mid, Number(si))
-    const opt = hit && ACTIONS[hit.task.state][Number(sj)]
+    const opt = hit && actionsFor(hit.task.state, hit.loop)[Number(sj)]
     if (hit && opt) await sendTask($, hit.ms, hit.task, Number(si), opt[0], opt[1])
   })
 
@@ -355,7 +379,7 @@ export const register: Register = on => {
       return (
         <Box key="ar" flexDirection="column" paddingLeft={3} marginBottom={1}>
           <Box key="arb" flexDirection="row" flexWrap="wrap">
-            {ACTIONS[t.state].flatMap((o, j) => [<Button key={`a:${ms.id}:${i}:${j}`} label={o[0]} variant={j === 0 ? 'primary' : undefined} onPress={noop} />, <Text key={`sp${j}`}> </Text>])}
+            {actionsFor(t.state, !!b.loop).flatMap((o, j) => [<Button key={`a:${ms.id}:${i}:${j}`} label={o[0]} variant={j === 0 ? 'primary' : undefined} onPress={noop} />, <Text key={`sp${j}`}> </Text>])}
             <Button key={`w:${ms.id}:${i}`} label="직접 쓰기…" onPress={noop} />
             <Text key="spw"> </Text>
             <Button key={`x:${ms.id}:${i}`} label="닫기" dimColor onPress={noop} />
@@ -446,6 +470,8 @@ export const register: Register = on => {
       <Box flexDirection="column">
         {b.goal ? <Text bold wrap="truncate-end">{b.goal}</Text> : null}
         <Text dimColor>{summaryLine(b)}</Text>
+        {b.loop ? <Text key="loop" color={b.loop.status === 'done' ? 'green' : undefined} dimColor={b.loop.status !== 'done'} wrap="truncate-end">{loopInfo(b.loop)}</Text> : null}
+        {b.loop && loopGate(b.loop) ? <Text key="gate" color="magenta" bold wrap="truncate-end">{loopGate(b.loop)}</Text> : null}
         {b.mismatch.slice(0, 2).map((m, i) => <Text key={`mm-${i}`} color="yellow" wrap="truncate-end">⚠ {m}</Text>)}
         {sent ? <Text key="sent" color="cyan" wrap="truncate-end">{`↗ ${sent.task} ${sent.label} 보냄 · 세션이 답하는 중 (끝나면 다른 카드도 누를 수 있습니다)`}</Text> : null}
         <Box key="bar" flexDirection="row" marginY={1}>
@@ -475,6 +501,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Text dimColor wrap="truncate-end">{summaryLine(b)}</Text>
+        {b.loop ? <Text color={loopGate(b.loop) ? 'magenta' : undefined} dimColor={!loopGate(b.loop)} bold={!!loopGate(b.loop)} wrap="truncate-end">{loopLine(b.loop)}</Text> : null}
         {await next(e)}
       </Box>
     )

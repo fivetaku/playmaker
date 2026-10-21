@@ -74,6 +74,10 @@ En la v0.1 las etiquetas del tablero están en coreano (대기 = en espera, 진�
 
 También lee PLAN en forma de tabla (`| M1a nombre | alcance |`) y encabezados `### M2 nombre`. playmaker solo lee archivos; nunca escribe en tu carpeta de objetivo.
 
+### Integración con insane-loop
+
+Si hay un diario `LOOP.md` de insane-loop en la carpeta de la meta o hasta dos carpetas por encima, el tablero y la línea sobre la entrada muestran una línea más, por ejemplo `루프 회차 3 · 검증 4/6 · 사다리 2단` (ronda del bucle, validaciones superadas, escalón). Cuando el bucle espera una decisión humana (`gate_pending`) muestra `⏸ 판단 대기: <pregunta>` de forma destacada, y cuando termina muestra `루프 완료`. Las tarjetas suman acciones: **gate 답하기** (responder la pregunta, en tareas en espera), **접근 바꿔서 다시** (reintentar con otro enfoque, en curso) y **DoD 다시 판정** (volver a comprobar la definición de terminado, en completadas). Si no hay un `LOOP.md` legible, solo falta la línea del bucle; el tablero funciona igual.
+
 ---
 
 ## Comandos

@@ -1,6 +1,6 @@
 {
   "name": "playmaker",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Live goal board for Claude Code — a mod pane that reads goaljaby's PLAN.md/PROGRESS.md and shows waiting · doing · done task cards with milestone tags and human-wait markers. Press a card to send the session a ready-made instruction (approve, ask progress, hold, or your own words). Hosts without panes (Paseo, headless) get a live local web board; Paseo opens it as a tab automatically.",
   "author": {
     "name": "fivetaku",

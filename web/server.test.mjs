@@ -3,9 +3,10 @@
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { chmodSync, mkdtempSync, readFileSync, existsSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { LOOP_ACTIONS } from '../hooks/parse.ts'
 
 const PLAN = `# PLAN
 
@@ -113,4 +114,62 @@ test('연결: auto는 살아 있는 연결을 바꾸지 않고, user는 바꾼�
 
 test('빈 메시지는 400', async () => {
   assert.equal((await post('api/send', { text: '   ' })).status, 400)
+})
+
+// ── insane-loop 저널(LOOP.md) ── 요청마다 다시 읽으므로 파일을 바꿔 가며 확인한다
+const LOOP = `# insane-loop 저널: 설정 토글
+
+- status: gate_pending
+- reviewer: codex (사다리2단)
+
+## 회차 3 — 2026-10-21
+- 검증: 통과 4/6 / 실패 항목: V5, V6
+- 사다리 단계: 2 / 리뷰어: codex
+- 판정: gate_pending: 서버 저장도 할까요?
+`
+const board = async () => (await fetch(url + 'api/board')).json()
+
+test('LOOP.md 없음: 루프 필드가 없다', async () => {
+  const b = await board()
+  assert.equal(b.loop, undefined)
+  assert.equal(b.loopInfo, undefined)
+})
+
+test('LOOP.md gate_pending(골 폴더): 회차 줄과 판단 대기 질문', async () => {
+  writeFileSync(join(goal, 'LOOP.md'), LOOP)
+  try {
+    const b = await board()
+    assert.equal(b.loop.status, 'gate_pending')
+    assert.equal(b.loopInfo, '루프 회차 3 · 검증 4/6 · 사다리 2단')
+    assert.equal(b.loopGate, '⏸ 판단 대기: 서버 저장도 할까요?')
+    assert.deepEqual(b.milestones[0].tasks.map(t => t.state), ['done', 'doing'])
+  } finally { rmSync(join(goal, 'LOOP.md')) }
+})
+
+test('LOOP.md 있음(골 폴더 위 1단계)·done: 루프 완료', async () => {
+  writeFileSync(join(tmp, 'LOOP.md'), LOOP.replace('- status: gate_pending', '- status: done').replace('통과 4/6 / 실패 항목: V5, V6', '통과 6/6').replace(/- 판정: .*\n$/, '- 판정: done\n'))
+  try {
+    const b = await board()
+    assert.equal(b.loopInfo, '루프 완료 · 회차 3 · 검증 6/6 · 사다리 2단')
+    assert.equal(b.loopGate, '')
+  } finally { rmSync(join(tmp, 'LOOP.md')) }
+})
+
+test('LOOP.md 깨진 형식: 보드는 그대로, 루프 표시만 빠진다', async () => {
+  writeFileSync(join(goal, 'LOOP.md'), '아무 형식 없는 메모\n- 그냥 목록\n')
+  try {
+    const b = await board()
+    assert.equal(b.error, undefined)
+    assert.equal(b.loop, undefined)
+    assert.equal(b.milestones.length, 2)
+  } finally { rmSync(join(goal, 'LOOP.md')) }
+})
+
+test('페이지: 루프 줄 자리와 루프 카드 행동(parse.ts와 같은 문구)이 있다', async () => {
+  const html = await (await fetch(url)).text()
+  assert.ok(html.includes('id="loop"'))
+  for (const list of Object.values(LOOP_ACTIONS)) for (const [label, body] of list) {
+    assert.ok(html.includes(`'${label}'`), label)
+    assert.ok(html.includes(`'${body}'`), label)
+  }
 })

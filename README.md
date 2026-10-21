@@ -74,6 +74,10 @@ Board labels are Korean in v0.1 (대기 = waiting, 진행 = doing, 완료 = done
 
 Table-style PLANs (`| M1a name | scope |`) and `### M2 name` headings are read too. playmaker only reads files; it never writes to your goal folder.
 
+### insane-loop integration
+
+If an insane-loop `LOOP.md` journal sits in the goal folder or up to two folders above it, the board and the line above the prompt get one more line such as `루프 회차 3 · 검증 4/6 · 사다리 2단` (loop round, validation passed, ladder stage). When the loop is waiting for a human decision (`gate_pending`) it shows `⏸ 판단 대기: <question>` prominently; when the loop is finished it shows `루프 완료`. Cards gain extra actions: **gate 답하기** (answer the gate, on waiting cards), **접근 바꿔서 다시** (retry with a different approach, on doing cards) and **DoD 다시 판정** (re-check the definition of done, on done cards). Without a readable `LOOP.md` only the loop line is left out; the board works as before.
+
 ---
 
 ## Commands
