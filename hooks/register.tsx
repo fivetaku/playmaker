@@ -233,7 +233,7 @@ async function boardCommand($: any, e: any): Promise<{ text: string; at?: string
   if (!dir) return { text: '골 폴더를 찾지 못했습니다. PLAN.md와 PROGRESS.md가 있는 폴더 경로를 인자로 주세요: /playmaker <경로>' }
   const b = await refresh($, dir, true)
   const at = await stamp($, dir)
-  await $.ui.open({ id: PANE, title: TITLE })
+  await $.ui.open({ id: PANE, title: TITLE, closeOnEscape: true })
   // Paseo: 보드는 옆 웹 탭이 보여 주므로 채팅에는 한 줄 요약과 탭 상태만 남긴다. 웹을 못 켜면 마크다운 보드로 대신한다
   if (await isPaseo($)) {
     const w = await webLine($, dir)
@@ -254,7 +254,7 @@ export const register: Register = on => {
       try {
         const b = await refresh($, dir)
         last = await stamp($, dir)
-        if (b.active) void $.ui.open({ id: PANE, title: TITLE })
+        if (b.active) void $.ui.open({ id: PANE, title: TITLE, closeOnEscape: true })
         // Paseo는 pane을 그리지 않으므로 진행 중인 골이면 웹 보드를 켜고 탭을 연다
         if (b.active && (await isPaseo($))) void webText($, dir, true, 'auto').catch(() => {})
       } catch { /* 첫 읽기 실패 시 보드 없이 시작 */ }
@@ -278,6 +278,16 @@ export const register: Register = on => {
   })
   on('turn.complete', async ($, e, next) => { await release($); return next(e) })
   on('turn.abort', async ($, e, next) => { await release($); return next(e) })
+
+  // 사람이 Esc나 패널 테두리의 ×로 닫으면 ✕ 닫기 버튼과 똑같이 입력창 위 요약 줄도 내린다
+  on('ui.close', async ($, e, next) => {
+    if (e.id === PANE && e.origin?.kind === 'person') {
+      const b = await read($, board)
+      if (b) await update($, board, () => ({ ...b, show: false }))
+      await update($, selected, () => null)
+    }
+    return next(e)
+  })
 
   // 패널 누르기: t 카드 펼치기/접기 · a 빠른 행동 보내기 · w 직접 쓰기 열기 · x 닫기
   on('ui.press', async ($, e, next) => {
@@ -345,7 +355,7 @@ export const register: Register = on => {
         const b = await refresh($, dir, true)
         last = await stamp($, dir)
         if (!b.allDone) {
-          void $.ui.open({ id: PANE, title: TITLE })
+          void $.ui.open({ id: PANE, title: TITLE, closeOnEscape: true })
           if (await isPaseo($)) void webText($, dir, true, 'auto').catch(noop)
         }
       }
@@ -481,7 +491,7 @@ export const register: Register = on => {
           <Text> </Text>
           <Button key="web" label="브라우저로 열기" onPress={noop} />
           <Text> </Text>
-          <Button key="close" label="✕ 닫기" dimColor role="dismiss" onPress={noop} />
+          <Button key="close" label="✕ 닫기" role="dismiss" onPress={noop} />
         </Box>
         {mode === 'state' ? byState : byMilestone}
         {c.taskTotal > 0 && b.milestones.every(m => m.source === 'legacy') ? (
