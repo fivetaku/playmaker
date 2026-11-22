@@ -173,6 +173,8 @@ export function parseBoard(dir: string, plan: string, progress: string, now: num
     return { id: h.id, name: h.name, status, waiting: legacyState === 'waiting', tasks, purpose, scope, doneWhen, source: 'legacy' }
   })
 
+  const allDone = milestones.length > 0 && milestones.every(m => m.status === 'done')
+  const blocked = allDone ? null : parseBlocked(progress)
   const failedText = section(progress, H.failed)
   const failed = failedText.split('\n').filter(l => /^\s*([-*]|\d+\.)\s+\S/.test(l) && !/^\s*[-*]\s*\(?없음\)?\s*$/.test(l)).length
   return {
@@ -181,10 +183,55 @@ export function parseBoard(dir: string, plan: string, progress: string, now: num
     milestones,
     failed,
     lastValidation: firstMeaningful(section(progress, H.validation)),
-    allDone: milestones.length > 0 && milestones.every(m => m.status === 'done'),
+    allDone,
     mismatch,
     updatedAt: now,
+    ...(blocked !== null ? { blocked } : {}),
   }
+}
+
+// ── goaljaby 0.9: BLOCKED 종료와 acceptance.json ─────────────
+// PROGRESS.md의 줄 머리 `BLOCKED: 사유`(굵게·목록 기호 허용, 코드 펜스 안은 무시). 가장 마지막 줄이 이긴다. 없으면 null
+export function parseBlocked(progress: string): string | null {
+  let found: string | null = null
+  let fence = false
+  for (const raw of progress.split('\n')) {
+    if (/^\s*(```|~~~)/.test(raw)) { fence = !fence; continue }
+    if (fence) continue
+    const m = raw.replace(/\*\*|__|`/g, '').match(/^\s*(?:[-*>]\s+)?BLOCKED\s*[:：]\s*(.*)$/)
+    if (m) found = m[1].trim()
+  }
+  return found
+}
+
+// 읽을 수 없는 JSON·배열이 아님·빈 배열이면 null(조용히 무시). passes가 true인 항목만 통과로 센다
+export function parseAcceptance(text: string): { passed: number; total: number } | null {
+  try {
+    const data = JSON.parse(text)
+    if (!Array.isArray(data) || data.length === 0) return null
+    return { passed: data.filter(x => x && typeof x === 'object' && x.passes === true).length, total: data.length }
+  } catch {
+    return null
+  }
+}
+
+// "⏸ 판단 대기: BLOCKED — 사유"(사유는 90자에서 자름). BLOCKED가 없으면 빈 문자열
+export function blockedGate(b: Board): string {
+  if (b.blocked === undefined) return ''
+  const r = b.blocked.replace(/\s+/g, ' ')
+  return `⏸ 판단 대기: BLOCKED${r ? ` — ${r.length > 90 ? `${r.slice(0, 89)}…` : r}` : ' (사유는 PROGRESS.md에)'}`
+}
+
+// "완료 기준 3/5 통과". 파일이 없으면 빈 문자열
+export function acceptanceLine(b: Board): string {
+  return b.acceptance ? `완료 기준 ${b.acceptance.passed}/${b.acceptance.total} 통과` : ''
+}
+
+export const ACCEPTANCE_WARN = '⚠ acceptance.json을 읽지 못했습니다 (JSON 형식 확인)'
+
+// 한 줄용(band): 막힘을 앞에 둬서 잘려도 사유가 보이게
+export function boardNote(b: Board): string {
+  return [blockedGate(b), acceptanceLine(b), b.acceptanceInvalid ? ACCEPTANCE_WARN : ''].filter(Boolean).join(' · ')
 }
 
 export function counts(b: Board) {
@@ -234,6 +281,8 @@ export function summaryText(b: Board): string {
   return [
     `**${summaryLine(b)}**`,
     ...(b.loop ? [loopInfo(b.loop), loopGate(b.loop) ? `**${loopGate(b.loop)}**` : ''] : []),
+    blockedGate(b) ? `**${blockedGate(b)}**` : '',
+    [acceptanceLine(b), b.acceptanceInvalid ? ACCEPTANCE_WARN : ''].filter(Boolean).join(' · '),
     b.goal ? `> ${b.goal}` : '',
     table.join('\n'),
     ms.join('\n\n'),
@@ -271,9 +320,16 @@ export const LOOP_ACTIONS: Partial<Record<TaskState, [label: string, body: strin
   done: [['DoD 다시 판정', 'VALIDATION 전체를 다시 실행해 insane-loop DoD(전체 통과 + blocking 가정 0)를 판정하고 LOOP.md에 회차로 기록해 주세요.']],
 }
 
-// 기존 행동 뒤에 루프 행동을 붙인다(번호가 밀리지 않게 항상 뒤에)
-export function actionsFor(state: TaskState, loop: boolean): [label: string, body: string][] {
-  return [...ACTIONS[state], ...(loop ? LOOP_ACTIONS[state] ?? [] : [])]
+// goaljaby 0.9 BLOCKED 종료가 PROGRESS.md에 있을 때만 덧붙는 카드 행동. 웹 보기의 BLOCKED_ACTS와 같은 문구를 쓴다
+const BLOCKED_ASK: [string, string] = ['막힘 답하기', 'PROGRESS.md의 최신 BLOCKED 줄(사유·시도 3개·다음 안전한 선택지)을 보여 주세요. 제가 선택지를 고르거나 답하면 그대로 막힘을 풀고, 막힌 작업의 PLAN.md 마커를 갱신해 골을 이어가 주세요.']
+export const BLOCKED_ACTIONS: Partial<Record<TaskState, [label: string, body: string][]>> = {
+  waiting: [BLOCKED_ASK],
+  doing: [BLOCKED_ASK],
+}
+
+// 기존 행동 뒤에 루프·BLOCKED 행동을 붙인다(번호가 밀리지 않게 항상 뒤에)
+export function actionsFor(state: TaskState, loop: boolean, blocked = false): [label: string, body: string][] {
+  return [...ACTIONS[state], ...(loop ? LOOP_ACTIONS[state] ?? [] : []), ...(blocked ? BLOCKED_ACTIONS[state] ?? [] : [])]
 }
 
 const STATE_LABEL: Record<TaskState, string> = { todo: '대기', doing: '진행', done: '완료', waiting: '사람 대기' }

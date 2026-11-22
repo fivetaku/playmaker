@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 import type { Board, Loop, Milestone, Task, TaskState } from '../types'
-import { about, actionMessage, actionsFor, counts, loopGate, loopInfo, loopLine, parseBoard, parseLoop, summaryLine, summaryText, taskId } from './parse'
+import { ACCEPTANCE_WARN, about, acceptanceLine, actionMessage, actionsFor, blockedGate, boardNote, counts, loopGate, loopInfo, loopLine, parseAcceptance, parseBoard, parseLoop, summaryLine, summaryText, taskId } from './parse'
 
 const PANE = 'playmaker'
 const TITLE = '골 진행'
@@ -41,11 +41,16 @@ async function sendTask($: any, ms: Milestone, task: Task, i: number, label: str
   }
 }
 
-async function taskAt($: any, mid: string, i: number): Promise<{ ms: Milestone; task: Task; loop: boolean } | null> {
+async function taskAt($: any, mid: string, i: number): Promise<{ ms: Milestone; task: Task; loop: boolean; blocked: boolean } | null> {
   const b = await read($, board)
   const ms = b?.milestones.find(x => x.id === mid)
   const task = ms?.tasks[i]
-  return ms && task ? { ms, task, loop: !!b?.loop } : null
+  return ms && task ? { ms, task, loop: !!b?.loop, blocked: b?.blocked !== undefined } : null
+}
+
+// PLAYMAKER_AUTO_OPEN=0이면 세션 시작 때 보드를 자동으로 열지 않는다(/playmaker로는 그대로 열린다). 기본은 켜짐
+async function autoOpenOff($: any): Promise<boolean> {
+  try { return (await $.env.get('PLAYMAKER_AUTO_OPEN'))?.trim() === '0' } catch { return false }
 }
 
 async function isGoalDir($: any, dir: string): Promise<boolean> {
@@ -113,7 +118,20 @@ async function stamp($: any, dir: string): Promise<string> {
   const b = await $.fs.stat(`${dir}/PROGRESS.md`)
   let l = ''
   try { const p = await loopPath($, dir); if (p) { const s = await $.fs.stat(p); l = `|${p}:${s.mtimeMs}:${s.size}` } } catch { /* LOOP.md 변화만 늦게 잡힘 */ }
-  return `${a.mtimeMs}:${a.size}|${b.mtimeMs}:${b.size}${l}`
+  let ac = ''
+  try { if (await $.fs.exists(`${dir}/acceptance.json`)) { const s = await $.fs.stat(`${dir}/acceptance.json`); ac = `|ac:${s.mtimeMs}:${s.size}` } } catch { /* acceptance.json 변화만 늦게 잡힘 */ }
+  return `${a.mtimeMs}:${a.size}|${b.mtimeMs}:${b.size}${l}${ac}`
+}
+
+// PLAN.md 옆 acceptance.json. 없으면 아무것도 안 붙이고, 못 읽는 형식이면 경고 표시만 붙인다
+async function loadAcceptance($: any, dir: string): Promise<Pick<Board, 'acceptance' | 'acceptanceInvalid'>> {
+  try {
+    if (!(await $.fs.exists(`${dir}/acceptance.json`))) return {}
+    const a = parseAcceptance(await $.fs.read(`${dir}/acceptance.json`))
+    return a ? { acceptance: a } : { acceptanceInvalid: true }
+  } catch {
+    return {}
+  }
 }
 
 async function refresh($: any, dir: string, show?: boolean): Promise<Board> {
@@ -123,6 +141,7 @@ async function refresh($: any, dir: string, show?: boolean): Promise<Board> {
   const parsed = parseBoard(dir, plan, progress, now)
   const loop = await loadLoop($, dir)
   if (loop) parsed.loop = loop
+  Object.assign(parsed, await loadAcceptance($, dir))
   const age = Math.max(0, now - (await touchedAt($, dir)))
   const active = !parsed.allDone && age < ACTIVE_MS
   const prev = await read($, board)
@@ -237,7 +256,7 @@ async function boardCommand($: any, e: any): Promise<{ text: string; at?: string
   // Paseo: 보드는 옆 웹 탭이 보여 주므로 채팅에는 한 줄 요약과 탭 상태만 남긴다. 웹을 못 켜면 마크다운 보드로 대신한다
   if (await isPaseo($)) {
     const w = await webLine($, dir)
-    return { text: w ? [`**${summaryLine(b)}**`, ...(b.loop ? [loopLine(b.loop)] : []), w].join('\n\n') : summaryText(b), at }
+    return { text: w ? [`**${summaryLine(b)}**`, ...(b.loop ? [loopLine(b.loop)] : []), boardNote(b), w].filter(Boolean).join('\n\n') : summaryText(b), at }
   }
   return { text: summaryText(b), at }
 }
@@ -252,11 +271,12 @@ export const register: Register = on => {
     try { dir = await locate($, '') } catch { dir = null }
     if (dir) {
       try {
-        const b = await refresh($, dir)
+        const off = await autoOpenOff($) // PLAYMAKER_AUTO_OPEN=0: 읽기와 폴링은 하되 열지·띄우지 않는다
+        const b = await refresh($, dir, off ? false : undefined)
         last = await stamp($, dir)
-        if (b.active) void $.ui.open({ id: PANE, title: TITLE, closeOnEscape: true })
+        if (b.active && !off) void $.ui.open({ id: PANE, title: TITLE, closeOnEscape: true })
         // Paseo는 pane을 그리지 않으므로 진행 중인 골이면 웹 보드를 켜고 탭을 연다
-        if (b.active && (await isPaseo($))) void webText($, dir, true, 'auto').catch(() => {})
+        if (b.active && !off && (await isPaseo($))) void webText($, dir, true, 'auto').catch(() => {})
       } catch { /* 첫 읽기 실패 시 보드 없이 시작 */ }
     }
     timer?.cancel()
@@ -330,7 +350,7 @@ export const register: Register = on => {
       return
     }
     const hit = await taskAt($, mid, Number(si))
-    const opt = hit && actionsFor(hit.task.state, hit.loop)[Number(sj)]
+    const opt = hit && actionsFor(hit.task.state, hit.loop, hit.blocked)[Number(sj)]
     if (hit && opt) await sendTask($, hit.ms, hit.task, Number(si), opt[0], opt[1])
   })
 
@@ -389,7 +409,7 @@ export const register: Register = on => {
       return (
         <Box key="ar" flexDirection="column" paddingLeft={3} marginBottom={1}>
           <Box key="arb" flexDirection="row" flexWrap="wrap">
-            {actionsFor(t.state, !!b.loop).flatMap((o, j) => [<Button key={`a:${ms.id}:${i}:${j}`} label={o[0]} variant={j === 0 ? 'primary' : undefined} onPress={noop} />, <Text key={`sp${j}`}> </Text>])}
+            {actionsFor(t.state, !!b.loop, b.blocked !== undefined).flatMap((o, j) => [<Button key={`a:${ms.id}:${i}:${j}`} label={o[0]} variant={j === 0 ? 'primary' : undefined} onPress={noop} />, <Text key={`sp${j}`}> </Text>])}
             <Button key={`w:${ms.id}:${i}`} label="직접 쓰기…" onPress={noop} />
             <Text key="spw"> </Text>
             <Button key={`x:${ms.id}:${i}`} label="닫기" dimColor onPress={noop} />
@@ -482,6 +502,9 @@ export const register: Register = on => {
         <Text dimColor>{summaryLine(b)}</Text>
         {b.loop ? <Text key="loop" color={b.loop.status === 'done' ? 'green' : undefined} dimColor={b.loop.status !== 'done'} wrap="truncate-end">{loopInfo(b.loop)}</Text> : null}
         {b.loop && loopGate(b.loop) ? <Text key="gate" color="magenta" bold wrap="truncate-end">{loopGate(b.loop)}</Text> : null}
+        {blockedGate(b) ? <Text key="blocked" color="magenta" bold wrap="truncate-end">{blockedGate(b)}</Text> : null}
+        {b.acceptance ? <Text key="accept" color={b.acceptance.passed === b.acceptance.total ? 'green' : undefined} dimColor={b.acceptance.passed !== b.acceptance.total} wrap="truncate-end">{acceptanceLine(b)}</Text> : null}
+        {b.acceptanceInvalid ? <Text key="acceptwarn" color="yellow" wrap="truncate-end">{ACCEPTANCE_WARN}</Text> : null}
         {b.mismatch.slice(0, 2).map((m, i) => <Text key={`mm-${i}`} color="yellow" wrap="truncate-end">⚠ {m}</Text>)}
         {sent ? <Text key="sent" color="cyan" wrap="truncate-end">{`↗ ${sent.task} ${sent.label} 보냄 · 세션이 답하는 중 (끝나면 다른 카드도 누를 수 있습니다)`}</Text> : null}
         <Box key="bar" flexDirection="row" marginY={1}>
@@ -512,6 +535,7 @@ export const register: Register = on => {
       <Box flexDirection="column">
         <Text dimColor wrap="truncate-end">{summaryLine(b)}</Text>
         {b.loop ? <Text color={loopGate(b.loop) ? 'magenta' : undefined} dimColor={!loopGate(b.loop)} bold={!!loopGate(b.loop)} wrap="truncate-end">{loopLine(b.loop)}</Text> : null}
+        {boardNote(b) ? <Text color={blockedGate(b) ? 'magenta' : undefined} dimColor={!blockedGate(b)} bold={!!blockedGate(b)} wrap="truncate-end">{boardNote(b)}</Text> : null}
         {await next(e)}
       </Box>
     )

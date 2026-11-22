@@ -9,7 +9,7 @@ import { randomBytes } from 'node:crypto'
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { loopGate, loopInfo, parseBoard, parseLoop, summaryLine } from '../hooks/parse.ts'
+import { ACCEPTANCE_WARN, acceptanceLine, blockedGate, loopGate, loopInfo, parseAcceptance, parseBoard, parseLoop, summaryLine } from '../hooks/parse.ts'
 
 const args = Object.fromEntries(
   process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1]]] : acc), []),
@@ -42,7 +42,16 @@ function board() {
   const b = parseBoard(DIR, plan, progress, Date.now())
   const touched = Math.max(statSync(`${DIR}/PLAN.md`).mtimeMs, statSync(`${DIR}/PROGRESS.md`).mtimeMs)
   const l = loop()
-  return { ...b, summary: summaryLine(b), touched, ...(l ? { loop: l, loopInfo: loopInfo(l), loopGate: loopGate(l) } : {}) }
+  // PLAN.md 옆 acceptance.json: 없으면 표시 없음, 못 읽는 형식이면 경고 한 줄만
+  let ac = {}
+  try {
+    if (existsSync(`${DIR}/acceptance.json`)) {
+      const a = parseAcceptance(readFileSync(`${DIR}/acceptance.json`, 'utf8'))
+      ac = a ? { acceptance: a } : { acceptanceInvalid: true }
+    }
+  } catch { /* 표시 없이 보드만 */ }
+  const bb = { ...b, ...ac }
+  return { ...bb, summary: summaryLine(b), touched, blockedGate: blockedGate(bb), acceptanceLine: acceptanceLine(bb), acceptanceWarn: bb.acceptanceInvalid ? ACCEPTANCE_WARN : '', ...(l ? { loop: l, loopInfo: loopInfo(l), loopGate: loopGate(l) } : {}) }
 }
 
 const run = (cmd, argv, ms = 8000) => new Promise((ok, fail) =>
@@ -262,8 +271,9 @@ function render(b){
     :row('목표',esc(b.goal))+ms.map(m=>row(diamond(m)+'M'+esc(m.id),'<b>'+esc(m.name)+'</b>'+(m.purpose||m.scope?' — '+esc(m.purpose||m.scope):''))).join('')
   $('about').innerHTML='<summary><b>'+(cur?'M'+esc(cur.id)+' '+esc(cur.name):'골 개요')+'</b><span>'+(cur?'이 마일스톤이 하는 일':'목표와 마일스톤별 할 일')+'</span></summary><div class="ab">'+(body||'<span></span><span>PLAN.md에 설명이 없습니다</span>')+'</div>'
   $('about').open=aboutOpen
-  const L=b.loop;$('loop').className='loopbar'+(L?'':' hidden')+(L&&L.status==='done'?' done':'')+(b.loopGate?' gate':'')
-  $('loop').innerHTML=L?(b.loopGate?'<span class="gq">'+esc(b.loopGate)+'</span>':'')+'<span>'+esc(b.loopInfo)+'</span>':''
+  const L=b.loop,bar=!!(L||b.blockedGate||b.acceptanceLine||b.acceptanceWarn),gate=b.loopGate||b.blockedGate
+  $('loop').className='loopbar'+(bar?'':' hidden')+(L&&L.status==='done'?' done':'')+(gate?' gate':'')
+  $('loop').innerHTML=(b.blockedGate?'<span class="gq">'+esc(b.blockedGate)+'</span>':'')+(L?(b.loopGate?'<span class="gq">'+esc(b.loopGate)+'</span>':'')+'<span>'+esc(b.loopInfo)+'</span>':'')+(b.acceptanceLine?'<span>'+esc(b.acceptanceLine)+'</span>':'')+(b.acceptanceWarn?'<span>'+esc(b.acceptanceWarn)+'</span>':'')
   $('warn').innerHTML=(b.mismatch||[]).map(x=>'<div class="warn">⚠ '+esc(x)+'</div>').join('')
   const all=shown.flatMap(m=>m.tasks.map((t,i)=>[m,t,i])),pick=s=>all.filter(([,t])=>s.includes(t.state))
   const todo=pick(['todo']),doing=pick(['doing','waiting']).sort((a,c)=>(c[1].state==='waiting')-(a[1].state==='waiting')),done=pick(['done'])
@@ -299,7 +309,10 @@ const LOOP_ACTS={
  waiting:[['gate 답하기','insane-loop가 기다리는 판단 질문(LOOP.md gate_pending)을 보여 주세요. 제가 답하면 그 답으로 PLAN·PRD를 갱신하고 /insane-loop로 재진입해 이어가 주세요.']],
  doing:[['접근 바꿔서 다시','이 작업을 insane-loop 사다리 2단으로 처리해 주세요. LOOP.md의 reviewer 설정으로 접근을 바꿔 다시 시도하고 회차 기록을 남겨 주세요.']],
  done:[['DoD 다시 판정','VALIDATION 전체를 다시 실행해 insane-loop DoD(전체 통과 + blocking 가정 0)를 판정하고 LOOP.md에 회차로 기록해 주세요.']]}
-const actsOf=s=>(ACTS[s]||[]).concat(cache&&cache.loop?LOOP_ACTS[s]||[]:[])
+// goaljaby 0.9 BLOCKED 종료가 PROGRESS.md에 있을 때만 덧붙는 행동. hooks/parse.ts의 BLOCKED_ACTIONS와 같은 문구
+const BLOCKED_ASK=['막힘 답하기','PROGRESS.md의 최신 BLOCKED 줄(사유·시도 3개·다음 안전한 선택지)을 보여 주세요. 제가 선택지를 고르거나 답하면 그대로 막힘을 풀고, 막힌 작업의 PLAN.md 마커를 갱신해 골을 이어가 주세요.']
+const BLOCKED_ACTS={waiting:[BLOCKED_ASK],doing:[BLOCKED_ASK]}
+const actsOf=s=>(ACTS[s]||[]).concat(cache&&cache.loop?LOOP_ACTS[s]||[]:[]).concat(cache&&cache.blockedGate?BLOCKED_ACTS[s]||[]:[])
 function msgFor(x,body){return '[playmaker · '+tid(x.m,x.t,x.i)+'] '+x.t.text+'\\n(M'+x.m.id+' '+x.m.name+' · 지금 상태: '+LABEL[x.t.state]+')\\n\\n'+body}
 function openPeek(k){sel=k;$('peek').classList.add('on');renderPeek(true);document.querySelectorAll('.card').forEach(el=>el.classList.toggle('sel',el.dataset.k===k))}
 function closePeek(){sel=null;$('peek').classList.remove('on');document.querySelectorAll('.card.sel').forEach(el=>el.classList.remove('sel'))}

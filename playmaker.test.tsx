@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'claude-code/testing'
-import { about, loopLine, parseBoard, parseLoop, summaryLine, summaryText } from './hooks/parse'
+import { about, blockedGate, loopLine, parseAcceptance, parseBlocked, parseBoard, parseLoop, summaryLine, summaryText } from './hooks/parse'
 
 // ── fixtures ────────────────────────────────────────────────
 // goaljaby 0.7+ 체크리스트 형식
@@ -554,4 +554,144 @@ test('LOOP.md 깨진 형식: 루프 표시만 빠지고 보드는 그대로', as
   const ui: any = await $.ui.mount(pane('terminal', 90))
   expect(await ui.find({ type: 'Text', text: /^대기 \(2\)$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /루프/ })).toBeUndefined()
+})
+
+// ── goaljaby 0.9: BLOCKED 종료 · acceptance.json · 자동 열림 끄기 ──
+const BLOCKED_PROGRESS = `# PROGRESS
+## 재개 순서
+1. 이 파일을 읽는다.
+## 현재 골
+인증까지 붙인 MVP를 배포한다.
+## 현재 마일스톤
+M2 인증
+## 리스크 / 블로커
+
+BLOCKED: 예전 사유
+- 시도 1: a → 실패
+
+BLOCKED: 운영 계정 키가 없어 OAuth 콜백 검증을 통과시킬 수 없다
+- 실패한 명령 또는 기준: npm run e2e
+- 다음 안전한 선택지: 테스트 계정 사용 / 사람이 키 제공
+`
+const withBlocked = { ...NEW, '/w/goal/PROGRESS.md': BLOCKED_PROGRESS }
+const AC_JSON = JSON.stringify([
+  { id: 'AC-01', criterion: 'a', check_command: 'npm test', passes: true, evidence: 'ok' },
+  { id: 'AC-02', criterion: 'b', check_command: 'npm run e2e', passes: false, evidence: '' },
+  { id: 'AC-03', criterion: 'c', check_command: 'npm run build', passes: true, evidence: 'ok' },
+])
+
+describe('BLOCKED 파서 (goaljaby 0.9)', () => {
+  test('가장 마지막 BLOCKED 줄이 이긴다', () => {
+    expect(parseBlocked(BLOCKED_PROGRESS)).toBe('운영 계정 키가 없어 OAuth 콜백 검증을 통과시킬 수 없다')
+  })
+  test('없으면 null, 코드 펜스·문장 중간의 BLOCKED는 무시', () => {
+    expect(parseBlocked(PROGRESS_NEW)).toBeNull()
+    expect(parseBlocked('```\nBLOCKED: 예시\n```\n재개 순서: `BLOCKED:` 줄이 풀렸는지 본다\n')).toBeNull()
+  })
+  test('굵게·목록 기호 허용, 사유가 비면 빈 문자열', () => {
+    expect(parseBlocked('- **BLOCKED:** 권한 없음')).toBe('권한 없음')
+    expect(parseBlocked('BLOCKED:')).toBe('')
+  })
+  test('긴 사유는 90자에서 자르고 ⏸ 판단 대기로 표시', () => {
+    const b = parseBoard('/w/goal', PLAN_NEW, `# P\nBLOCKED: ${'가'.repeat(200)}\n`, 1)
+    const g = blockedGate(b)
+    expect(g.startsWith('⏸ 판단 대기: BLOCKED — 가가')).toBe(true)
+    expect(g.endsWith('…')).toBe(true)
+    expect(g.length).toBeLessThan(120)
+  })
+  test('끝난 골에는 붙지 않는다', () => {
+    expect(parseBoard('/w/goal', DONE_PLAN, 'BLOCKED: 옛 기록\n', 1).blocked).toBeUndefined()
+  })
+  test('옛 형식(## 완료 섹션) PROGRESS는 그대로', () => {
+    expect(parseBoard('/w/goal', PLAN_NEW, PROGRESS_NEW, 1).blocked).toBeUndefined()
+  })
+})
+
+describe('acceptance.json 파서', () => {
+  test('passes: true 개수만 센다', () => expect(parseAcceptance(AC_JSON)).toEqual({ passed: 2, total: 3 }))
+  test('깨진 JSON·배열 아님·빈 배열은 null', () => {
+    expect(parseAcceptance('{not json')).toBeNull()
+    expect(parseAcceptance('{"a":1}')).toBeNull()
+    expect(parseAcceptance('[]')).toBeNull()
+  })
+})
+
+test('BLOCKED: 텍스트 요약·pane·band에 ⏸ 판단 대기, 막힘 답하기로 지시', async ($, on) => {
+  mockEngine(on, withBlocked)
+  on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => { const { Text } = $.ui.resolve(e); return <Text>engine-base</Text> })
+  const submitted: string[] = []
+  on('prompt.submit', ($: any, e: any) => { submitted.push(e.text); return { text: e.text } })
+  const text = JSON.stringify(await $.command.run(RUN))
+  expect(text).toContain('**⏸ 판단 대기: BLOCKED — 운영 계정 키가 없어')
+  const ui: any = await $.ui.mount(pane('terminal', 90))
+  const g: any = await ui.find({ type: 'Text', text: /^⏸ 판단 대기: BLOCKED — 운영 계정/ })
+  expect(g).toBeDefined()
+  expect(g.props.bold).toBe(true)
+  const band: any = await $.ui.mount({ plugin: 'playmaker', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 3, bodyColumns: 80 } as any })
+  expect(await band.find({ type: 'Text', text: /⏸ 판단 대기: BLOCKED/ })).toBeDefined()
+  await ui.press({ key: 't:2:1' })
+  expect(JSON.stringify(await ui.drawn())).toContain('승인하고 진행') // 기존 행동은 그대로
+  expect(await ui.find({ type: 'Button', key: 'a:2:1:3' })).toBeDefined()
+  await ui.press({ key: 'a:2:1:3' })
+  expect(submitted.length).toBe(1)
+  expect(submitted[0]).toContain('[playmaker · M2-T2]')
+  expect(submitted[0]).toContain('최신 BLOCKED 줄')
+})
+
+test('BLOCKED 없음: 막힘 표시도 행동도 없다', async ($, on) => {
+  mockEngine(on, NEW)
+  expect(JSON.stringify(await $.command.run(RUN))).not.toContain('BLOCKED')
+  const ui: any = await $.ui.mount(pane('terminal', 90))
+  await ui.press({ key: 't:2:1' })
+  expect(await ui.find({ type: 'Button', key: 'a:2:1:3' })).toBeUndefined()
+})
+
+test('acceptance.json 있음: 완료 기준 2/3 통과', async ($, on) => {
+  mockEngine(on, { ...NEW, '/w/goal/acceptance.json': AC_JSON })
+  expect(JSON.stringify(await $.command.run(RUN))).toContain('완료 기준 2/3 통과')
+  const ui: any = await $.ui.mount(pane('terminal', 90))
+  expect(await ui.find({ type: 'Text', text: /^완료 기준 2\/3 통과$/ })).toBeDefined()
+})
+
+test('acceptance.json 없음: 표시 없음', async ($, on) => {
+  mockEngine(on, NEW)
+  expect(JSON.stringify(await $.command.run(RUN))).not.toContain('완료 기준')
+  const ui: any = await $.ui.mount(pane('terminal', 90))
+  expect(await ui.find({ type: 'Text', text: /완료 기준/ })).toBeUndefined()
+})
+
+test('acceptance.json 깨진 JSON: 크래시 없이 경고 한 줄, 보드는 그대로', async ($, on) => {
+  mockEngine(on, { ...NEW, '/w/goal/acceptance.json': '[{"id": ' })
+  const text = JSON.stringify(await $.command.run(RUN))
+  expect(text).toContain('골 1/3 · 진행 M2')
+  expect(text).not.toContain('완료 기준 ')
+  expect(text).toContain('acceptance.json을 읽지 못했습니다')
+  const ui: any = await $.ui.mount(pane('terminal', 90))
+  expect(await ui.find({ type: 'Text', text: /^대기 \(2\)$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /acceptance\.json을 읽지 못했습니다/ })).toBeDefined()
+})
+
+test('세션 시작: PLAYMAKER_AUTO_OPEN=0이면 열지 않고 band도 내려 둔다, /playmaker는 그대로 연다', async ($, on) => {
+  const opened = mockEngine(on, { '/w/goal/PLAN.md': PLAN_NEW, '/w/goal/PROGRESS.md': PROGRESS_NEW }, 100)
+  on('env.get', ($: any, e: any) => ({ value: e.name === 'PLAYMAKER_AUTO_OPEN' ? '0' : undefined }))
+  on('command.register', () => ({ value: undefined }))
+  on('clock.every', () => ({ value: { cancel() {} } }))
+  on('session.start', ($: any, e: any) => e)
+  on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => { const { Text } = $.ui.resolve(e); return <Text>engine-base</Text> })
+  await $.session.start(START)
+  expect(opened.length).toBe(0)
+  const band: any = await $.ui.mount({ plugin: 'playmaker', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 3, bodyColumns: 80 } as any })
+  expect(await band.find({ type: 'Text', text: /골 \d\/3/ })).toBeUndefined()
+  await $.command.run(RUN)
+  expect(opened).toEqual(['playmaker'])
+})
+
+test('세션 시작: PLAYMAKER_AUTO_OPEN이 0이 아니면(1) 기존처럼 열린다', async ($, on) => {
+  const opened = mockEngine(on, { '/w/goal/PLAN.md': PLAN_NEW, '/w/goal/PROGRESS.md': PROGRESS_NEW }, 100)
+  on('env.get', ($: any, e: any) => ({ value: e.name === 'PLAYMAKER_AUTO_OPEN' ? '1' : undefined }))
+  on('command.register', () => ({ value: undefined }))
+  on('clock.every', () => ({ value: { cancel() {} } }))
+  on('session.start', ($: any, e: any) => e)
+  await $.session.start(START)
+  expect(opened.length).toBe(1)
 })

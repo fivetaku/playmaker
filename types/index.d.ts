@@ -57,6 +57,12 @@ export type Board = {
   show?: boolean
   /** 골 폴더나 그 위 2단계에 insane-loop LOOP.md가 있고 읽을 수 있을 때만 */
   loop?: Loop
+  /** PROGRESS.md의 최신 `BLOCKED:` 줄 사유(goaljaby 0.9+). 줄은 있고 사유가 비면 '' — 끝난 골에서는 붙지 않는다 */
+  blocked?: string
+  /** PLAN.md 옆 acceptance.json의 `passes: true` 수 / 전체 수. 파일이 없거나 비면 붙지 않는다 */
+  acceptance?: { passed: number; total: number }
+  /** acceptance.json이 있는데 읽을 수 없는 JSON·형식일 때 */
+  acceptanceInvalid?: boolean
 }
 
 declare module 'claude-code' {
