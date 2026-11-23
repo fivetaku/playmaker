@@ -115,15 +115,19 @@ function allowed(req) {
 
 const LOGO = readFileSync(new URL('../assets/logo.svg', import.meta.url))
 
+// 라이트 테마 색. 시스템이 라이트면 자동으로, 상단 테마 버튼으로 고르면 그대로 쓴다.
+const LIGHT = '--bg:#fcfcfd;--bar:#fcfcfd;--lane:#f4f5f8;--card:#fff;--card-h:#fbfbfc;--line:#e6e7eb;--line2:#d9dbe0;--fg:#1b1c1f;--fg2:#3c3f45;--dim:#6b6f76;--faint:#a0a4ab;--todo:#a0a4ab;--doing:#e2b203;--wait:#e8790d'
+
 const PAGE = `<!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light">
 <title>playmaker</title>
 <link rel="icon" href="logo.svg" type="image/svg+xml">
 <style>
 :root{--bg:#0f1011;--bar:#0f1011;--lane:#141517;--card:#1b1c1f;--card-h:#212226;--line:#232428;--line2:#2e2f35;
 --fg:#eeeff1;--fg2:#c4c6cc;--dim:#8a8f98;--faint:#5d6169;--todo:#8a8f98;--doing:#f2c94c;--wait:#f2994a;--done:#5e6ad2;--focus:#5e6ad2;
 --font:"Inter Variable","Inter",-apple-system,BlinkMacSystemFont,"Pretendard","Apple SD Gothic Neo",system-ui,sans-serif}
-:root.light{--bg:#fcfcfd;--bar:#fcfcfd;--lane:#f4f5f8;--card:#fff;--card-h:#fbfbfc;--line:#e6e7eb;--line2:#d9dbe0;--fg:#1b1c1f;--fg2:#3c3f45;--dim:#6b6f76;--faint:#a0a4ab;--todo:#a0a4ab;--doing:#e2b203;--wait:#e8790d}
+:root.light{${LIGHT}}
+@media (prefers-color-scheme:light){:root:not(.dark){${LIGHT}}}
 *{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--fg)}
 body{font:13px/1.45 var(--font);-webkit-font-smoothing:antialiased;font-feature-settings:"cv11","ss01";display:flex;flex-direction:column}
 button{font:inherit;color:inherit}
@@ -192,8 +196,8 @@ main{flex:1;overflow:auto}
 .menu button{all:unset;cursor:pointer;display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;padding:6px 8px;border-radius:5px;color:var(--fg2);font-size:12.5px}
 .menu button:hover{background:var(--card-h);color:var(--fg)}.menu button .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.menu button .ck{color:var(--focus)}
 /* 상세 패널 (Linear 이슈 미리보기) */
-.peek{position:fixed;top:0;right:0;bottom:0;width:min(400px,100%);z-index:30;background:var(--card);border-left:1px solid var(--line2);box-shadow:-16px 0 40px rgba(0,0,0,.35);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .18s ease}
-.peek.on{transform:none}
+.peek{position:fixed;top:0;right:0;bottom:0;width:min(400px,100%);z-index:30;background:var(--card);border-left:1px solid var(--line2);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .18s ease}
+.peek.on{transform:none;box-shadow:-16px 0 40px rgba(0,0,0,.35)}
 .ph{display:flex;align-items:center;gap:8px;height:44px;padding:0 12px;border-bottom:1px solid var(--line);color:var(--faint);font-size:12px}
 .ph .x{all:unset;cursor:pointer;margin-left:auto;width:24px;height:24px;display:grid;place-items:center;border-radius:5px;color:var(--dim)}.ph .x:hover{background:var(--card-h);color:var(--fg)}
 .pb{flex:1;overflow:auto;padding:14px 16px}
@@ -219,6 +223,7 @@ main{flex:1;overflow:auto}
   <span class="sp"></span>
   <span id="live" class="live"><i></i><span>실시간</span></span>
   <div class="lk hidden" id="lk"><button class="lkb" id="lkb" title="골 작업 세션 (메시지를 받을 세션)"><span class="dot none" id="lkd"></span><span class="nm" id="lkn">세션 연결</span><svg width="10" height="10" viewBox="0 0 10 10"><path d="M2.5 4l2.5 2.5L7.5 4" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button><div class="menu hidden" id="menu"></div></div>
+  <button class="ib" id="vTheme" title="테마 바꾸기 (T)"></button>
   <button class="ib" id="vDone" title="완료 작업 펼치기 (D)">완료 펼치기 <kbd>D</kbd></button>
   <div class="vs"><button id="vBoard" class="on" title="보드 (1)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2.5" width="3.3" height="11" rx="1"/><rect x="6.35" y="2.5" width="3.3" height="7.5" rx="1"/><rect x="10.7" y="2.5" width="3.3" height="9.5" rx="1"/></svg>보드</button><button id="vList" title="리스트 (2)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M5.5 4h8M5.5 8h8M5.5 12h8"/><circle cx="2.6" cy="4" r=".6" fill="currentColor"/><circle cx="2.6" cy="8" r=".6" fill="currentColor"/><circle cx="2.6" cy="12" r=".6" fill="currentColor"/></svg>리스트</button></div>
 </header>
@@ -231,7 +236,13 @@ main{flex:1;overflow:auto}
 <aside class="peek" id="peek"><div class="ph"><span id="pid"></span><button class="x" id="px" title="닫기 (Esc)">✕</button></div><div class="pb" id="pb"></div></aside>
 <div class="toast" id="toast"></div>
 <script>
-if(new URLSearchParams(location.search).get('theme')==='light')document.documentElement.classList.add('light')
+const THEMES=['auto','light','dark'],THEME_LABEL={auto:'시스템',light:'라이트',dark:'다크'}
+function savedTheme(){const q=new URLSearchParams(location.search).get('theme');if(THEMES.includes(q))return q;const m=document.cookie.match(/(?:^|; )pm_theme=(auto|light|dark)/);return m?m[1]:'auto'}
+let theme=savedTheme()
+function applyTheme(){const r=document.documentElement;r.classList.toggle('light',theme==='light');r.classList.toggle('dark',theme==='dark');const b=document.getElementById('vTheme');if(b)b.textContent='테마: '+THEME_LABEL[theme]}
+function cycleTheme(){theme=THEMES[(THEMES.indexOf(theme)+1)%THEMES.length];document.cookie='pm_theme='+theme+'; path=/; max-age=31536000; samesite=strict';applyTheme()}
+applyTheme()
+document.getElementById('vTheme').onclick=cycleTheme
 const COLOR={todo:'var(--todo)',doing:'var(--doing)',waiting:'var(--wait)',done:'var(--done)'}
 const LABEL={todo:'대기',doing:'진행',waiting:'사람 대기',done:'완료'}
 const ICON={
@@ -351,7 +362,7 @@ vBoard.onclick=()=>{view='board';rerender()};vList.onclick=()=>{view='list';rere
 $('px').onclick=closePeek
 $('lkb').onclick=e=>{e.stopPropagation();menuOn=!menuOn;$('menu').classList.toggle('hidden',!menuOn);if(menuOn&&cache)renderMenu(cache)}
 document.addEventListener('click',e=>{if(menuOn&&!$('lk').contains(e.target)){menuOn=false;$('menu').classList.add('hidden')}})
-addEventListener('keydown',e=>{if(e.key==='Escape'){closePeek();return}if(/^(TEXTAREA|INPUT)$/.test(document.activeElement&&document.activeElement.tagName))return;if(e.metaKey||e.ctrlKey||e.altKey)return;if(e.key==='1'){view='board';rerender()}else if(e.key==='2'){view='list';rerender()}else if(e.key==='d'||e.key==='D'){open=!open;rerender()}})
+addEventListener('keydown',e=>{if(e.key==='Escape'){closePeek();return}if(/^(TEXTAREA|INPUT)$/.test(document.activeElement&&document.activeElement.tagName))return;if(e.metaKey||e.ctrlKey||e.altKey)return;if(e.key==='1'){view='board';rerender()}else if(e.key==='2'){view='list';rerender()}else if(e.key==='d'||e.key==='D'){open=!open;rerender()}else if(e.key==='t'||e.key==='T'){cycleTheme()}})
 apply();tick();setInterval(tick,2000);setInterval(()=>{ago();if(sel&&cache&&!cache.error&&!(document.activeElement&&document.activeElement.id==='ta'))renderPeek()},1000)
 </script></body></html>`
 
