@@ -3,6 +3,7 @@
 ## 0.3.0 (2026-11-23)
 
 - **Codex에서도 같은 스킬로 동작**: `skills/playmaker/SKILL.md`가 생겼다. Codex에는 mod 패널이 없어 브라우저 웹 보드 주소(`http://127.0.0.1:<포트>/`)를 알려 준다. 웹 서버에 `--codex <codex CLI> --thread <스레드 ID>` 옵션을 더해, 카드 행동이 `codex queue --thread <ID> --message <text>`로 그 스레드에 전달된다(연결 표시는 "Codex 스레드 <앞 8자리>"). Paseo 모드와 Claude Code 동작은 그대로다. 시험은 `tests/codex-mode.test.mjs`.
+- Codex에서 서버는 끝나지 않는 명령 하나로, 샌드박스 밖 권한으로 띄운다. `nohup … &`로 떼어 낸 서버는 턴이 끝나면 응답하지 않았고, 샌드박스 안에서 띄운 서버는 카드 행동의 `codex queue`가 `Operation not permitted`로 실패했다(둘 다 격리 Codex 실측). 보드는 그 Codex 세션이 열려 있는 동안 떠 있다.
 
 ## 0.2.1 (2026-11-23)
 
