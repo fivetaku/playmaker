@@ -28,6 +28,8 @@
 /plugin install playmaker
 ```
 
+Codex: `codex plugin marketplace add fivetaku/gptaku_plugins` 후 `codex plugin add playmaker@gptaku-plugins`.
+
 ### 3. Claude Code 재시작
 
 ### 4. 보드 열기

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0 (2026-11-23)
+
+- **Codex에서도 같은 스킬로 동작**: `skills/playmaker/SKILL.md`가 생겼다. Codex에는 mod 패널이 없어 브라우저 웹 보드 주소(`http://127.0.0.1:<포트>/`)를 알려 준다. 웹 서버에 `--codex <codex CLI> --thread <스레드 ID>` 옵션을 더해, 카드 행동이 `codex queue --thread <ID> --message <text>`로 그 스레드에 전달된다(연결 표시는 "Codex 스레드 <앞 8자리>"). Paseo 모드와 Claude Code 동작은 그대로다. 시험은 `tests/codex-mode.test.mjs`.
+
 ## 0.2.1 (2026-11-23)
 
 - **웹 보드 라이트·다크 전환**: 이제 시스템(브라우저·Paseo) 테마를 따라 라이트·다크가 저절로 바뀐다. 상단 **테마** 버튼이나 `T` 키로 시스템 → 라이트 → 다크를 고를 수 있고, 고른 값은 쿠키에 남아 서버 포트가 바뀌어도 유지된다. 주소의 `?theme=light|dark|auto`가 가장 우선한다. 전에는 다크로 고정이었고 라이트는 `?theme=light`를 직접 붙여야만 켜졌다.

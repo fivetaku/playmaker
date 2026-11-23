@@ -3,6 +3,7 @@
 // 의존성 없음. 127.0.0.1에만 열고, 시작할 때 받은 골 폴더 하나의 PLAN.md·PROGRESS.md(+ insane-loop LOOP.md)만 읽는다(쓰지 않는다).
 // Paseo에서는 골 작업 세션에 연결해 카드에서 그 세션으로 메시지를 보낼 수 있다(`paseo send`).
 // 사용: node server.mjs --dir <골 폴더> [--port 4777] [--port-file <경로>] [--paseo <paseo CLI> --project <에이전트 cwd> --agent <ID>]
+// Codex: --codex <codex CLI> --thread <Codex 스레드 ID> 를 주면 카드 메시지를 `codex queue --thread <ID> --message <text>`로 보낸다.
 import { createServer } from 'node:http'
 import { execFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
@@ -17,6 +18,10 @@ const args = Object.fromEntries(
 const DIR = resolve(args.dir ?? process.cwd())
 const FIRST = Number(args.port ?? 4777)
 const PASEO = args.paseo || ''
+const CODEX = args.codex || ''
+const THREAD = args.thread || ''
+const CODEX_ON = !!(CODEX && THREAD)
+const CODEX_LINK = CODEX_ON ? { id: THREAD, shortId: THREAD.slice(0, 8), name: `Codex 스레드 ${THREAD.slice(0, 8)}`, status: 'idle' } : null
 const PROJECT = args.project ? resolve(args.project) : ''
 const TOKEN = randomBytes(16).toString('hex') // 이 페이지에서 온 요청만 메시지를 보낼 수 있게
 const IDLE_MS = 6 * 3600 * 1000 // 6시간 아무도 안 보면 스스로 종료
@@ -76,6 +81,7 @@ async function agents() {
 }
 
 async function linkInfo() {
+  if (CODEX_ON) return { paseo: true, codex: true, link: { ...CODEX_LINK }, agents: [{ ...CODEX_LINK }] }
   if (!PASEO) return { paseo: false }
   const list = await agents()
   const cur = link && list.find(a => a.id === link.agentId || a.id.startsWith(link.agentId) || a.shortId === link.agentId)
@@ -92,7 +98,8 @@ function setLink(agentId, mode) {
 async function send(text, task, label) {
   const info = await linkInfo()
   if (!info.link) throw new Error('연결된 세션이 없습니다')
-  await run(PASEO, ['send', info.link.id, '--no-wait', '--json', '--prompt', text], 15000)
+  if (CODEX_ON) await run(CODEX, ['queue', '--thread', THREAD, '--message', text], 15000)
+  else await run(PASEO, ['send', info.link.id, '--no-wait', '--json', '--prompt', text], 15000)
   sent.unshift({ at: Date.now(), to: info.link.name, task, label, text })
   sent.length = Math.min(sent.length, 30)
   return info.link

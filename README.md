@@ -28,6 +28,8 @@ goaljaby scores the goal; playmaker reads the whole pitch. playmaker is a Claude
 /plugin install playmaker
 ```
 
+Codex: `codex plugin marketplace add fivetaku/gptaku_plugins`, then `codex plugin add playmaker@gptaku-plugins`.
+
 ### 3. Restart Claude Code
 
 ### 4. Open the board
